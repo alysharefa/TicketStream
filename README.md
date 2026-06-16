@@ -1,5 +1,7 @@
 # TicketStream — Sistem Pemesanan Tiket Konser (Microservices)
 
+> **Repository:** https://github.com/alysharefa/TicketStream
+
 Sistem pemesanan tiket konser berbasis **3 microservice** yang dirancang untuk
 menangani lonjakan trafik tinggi tanpa overselling. Pemesanan diproses secara
 **asinkron** melalui antrean pesan (RabbitMQ), sementara kuota dikurangi secara
@@ -14,9 +16,9 @@ Client/Postman
      │
      ├──► Service 1: Hasura GraphQL ──► PostgreSQL (katalog konser)
      │
-     ├──► Service 2: Laravel REST ──► MySQL (booking) ──► RabbitMQ (publish)
-     │                                                       │
-     └──► Service 3: Laravel Lighthouse ──► MySQL (tiket) ◄──┘ (consume)
+     ├──► Service 2: Laravel REST + Lighthouse GraphQL ──► MySQL (booking) ──► RabbitMQ (publish)
+     │                                                                           │
+     └──► Service 3: Laravel Lighthouse GraphQL ──► MySQL (tiket)            ◄───┘ (consume)
               │
               └──► mutation Hasura (kurangi kuota atomik)
 ```
@@ -24,7 +26,7 @@ Client/Postman
 | Service | Peran | Teknologi | Database | Port |
 |---------|-------|-----------|----------|------|
 | **S1** Katalog Event | Data master konser, API GraphQL auto-generate | Hasura + PostgreSQL | `db_event_catalog` | 8080 |
-| **S2** Booking & Queue | Terima pesanan, antrekan ke RabbitMQ | Laravel 12 REST + MySQL | `db_ticket_booking` | 8001 |
+| **S2** Booking & Queue | Terima pesanan, antrekan ke RabbitMQ | Laravel 12 REST + Lighthouse GraphQL + MySQL | `db_ticket_booking` | 8001 |
 | **S3** Payment & Issuing | Proses antrean, bayar, terbitkan tiket | Laravel 12 + Lighthouse GraphQL + MySQL | `db_ticket_issuing` | 8002 |
 | **MQ** RabbitMQ | Broker pesan (queue: `ticket_orders`) | RabbitMQ 3 + Management UI | — | 5672, 15672 |
 
@@ -32,12 +34,13 @@ Client/Postman
 
 ```
 1. Client         ──► query konser (GraphQL S1/Hasura)
-2. Client         ──► POST /api/bookings (REST S2)
+2. Client         ──► POST /api/bookings (REST S2) atau createBooking (GraphQL S2)
 3. S2 Booking     ──► publish pesan ke RabbitMQ
 4. S3 Worker      ──► consume pesan (berurutan, 1 per 1)
 5. S3 Worker      ──► mutation kurangi kuota (GraphQL S1/Hasura)
 6. S3 Worker      ──► terbitkan tiket (TKT-2026-XXXXX)
 7. Client         ──► query tiket (GraphQL S3/Lighthouse)
+8. Client         ──► query status booking (GraphQL S2/Lighthouse)
 ```
 
 ---
@@ -46,7 +49,7 @@ Client/Postman
 
 - **Hasura GraphQL Engine** — GraphQL auto-generate dari skema PostgreSQL
 - **Laravel 12** (PHP 8.3) — framework untuk S2 (REST) dan S3 (GraphQL)
-- **Lighthouse** — paket GraphQL manual untuk Laravel (S3)
+- **Lighthouse** — paket GraphQL manual untuk Laravel (S2 & S3)
 - **PostgreSQL 16** — database S1
 - **MySQL 8** — database S2 dan S3 (terpisah, polyglot persistence)
 - **RabbitMQ 3** — message broker antar service
@@ -114,6 +117,7 @@ lalu **Track All** pada tabel `artists` dan `concerts`.
 |---------|-----|------|
 | Hasura Console | http://localhost:8080 | Buka console, lihat tabel |
 | Booking REST | http://localhost:8001/api/bookings | POST pesanan |
+| Booking GraphQL | http://localhost:8001/graphql | Query booking |
 | GraphQL S3 | http://localhost:8002/graphql | Query tiket |
 | RabbitMQ UI | http://localhost:15672 | Login guest/guest |
 
@@ -142,7 +146,15 @@ curl -s -X POST http://localhost:8001/api/bookings \
 Respon: `202 Accepted` + `order_code` (mis. `ORD-20260615-AB12`).
 Pesanan sudah diantrekan, worker akan memproses secara otomatis.
 
-### Langkah 3: Cek status tiket (GraphQL S3)
+### Langkah 3: Cek status booking (GraphQL S2)
+
+```bash
+curl -s http://localhost:8001/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ bookingByOrder(order_code: \"ORD-20260615-AB12\") { order_code status quantity amount } }"}'
+```
+
+### Langkah 4: Cek status tiket (GraphQL S3)
 
 ```bash
 curl -s http://localhost:8002/graphql \
@@ -163,6 +175,7 @@ Impor file berikut ke Postman untuk testing interaktif:
 
 | Service | File |
 |---------|------|
+| **Semua Service (Gabungan)** | `postman/TicketStream-AllServices.postman_collection.json` |
 | S1 Katalog Event | `KatalogService/postman/Service1-EventCatalog.postman_collection.json` |
 | S2 Booking & Queue | `BookingService/postman/Service2-Booking.postman_collection.json` |
 | S3 Payment & Issuing | `PaymentService/postman/Service3-Payment.postman_collection.json` |
@@ -222,10 +235,11 @@ TicketStream/
 │   ├── graphql/                    #   contoh query & mutation
 │   ├── postman/                    #   koleksi Postman S1
 │   └── README.md
-├── BookingService/                 # Service 2 — Laravel REST + MySQL
+├── BookingService/                 # Service 2 — Laravel REST + GraphQL + MySQL
 │   ├── Dockerfile                  #   image PHP 8.3
 │   ├── app/Http/Controllers/       #   BookingController
 │   ├── app/Jobs/                   #   ProcessTicketOrder (publisher)
+│   ├── graphql/schema.graphql      #   SDL Lighthouse
 │   ├── routes/api.php              #   REST endpoints
 │   ├── postman/                    #   koleksi Postman S2
 │   └── README.md
@@ -293,8 +307,8 @@ Ubah port di `.env` root:
 2. **Kuota dikurangi di consumer** (bukan publisher) — memproses berurutan mencegah race condition.
 3. **Mutation Hasura dengan syarat `available_quota > 0`** — atomic decrement, mustahil oversell.
 4. **Class Job identik** di S2 & S3 — agar serialisasi RabbitMQ bisa di-resolve kedua sisi.
-5. **Dua gaya GraphQL** — Hasura (auto-generate, S1) vs Lighthouse (manual, S3) — mendemonstrasikan
-   dua pendekatan GraphQL yang berbeda dalam satu sistem.
+5. **Tiga penerapan GraphQL** — Hasura (auto-generate, S1) + Lighthouse (manual, S2 & S3) — mendemonstrasikan
+   dua pendekatan GraphQL yang berbeda dalam satu sistem. Semua 3 service memiliki GraphQL endpoint.
 
 ---
 

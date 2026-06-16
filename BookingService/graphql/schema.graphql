@@ -1,0 +1,28 @@
+"A datetime string with format `Y-m-d H:i:s`, e.g. `2018-05-23 13:43:32`."
+scalar DateTime @scalar(class: "Nuwave\\Lighthouse\\Schema\\Types\\Scalars\\DateTime")
+
+type Booking {
+    id: ID!
+    order_code: String!
+    concert_id: Int!
+    user_id: String!
+    quantity: Int!
+    amount: Int!
+    status: String!
+    created_at: DateTime
+    updated_at: DateTime
+}
+
+type Query {
+    "Cari booking berdasarkan order_code."
+    bookingByOrder(order_code: String! @eq): Booking @find(model: "App\\Models\\Booking")
+
+    "Semua booking milik user tertentu."
+    myBookings(user_id: String! @eq): [Booking!]! @all(model: "App\\Models\\Booking")
+
+    "Semua booking untuk konser tertentu."
+    bookingsByConcert(concert_id: Int! @eq): [Booking!]! @all(model: "App\\Models\\Booking")
+
+    "Daftar semua booking."
+    allBookings: [Booking!]! @all(model: "App\\Models\\Booking")
+}

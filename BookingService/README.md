@@ -50,6 +50,38 @@ curl -s -X POST http://localhost:8001/api/bookings \
 curl -s http://localhost:8001/api/bookings/ORD-20260615-AB12
 ```
 
+## GraphQL API
+
+Selain REST, service ini juga menyediakan **GraphQL API** via Lighthouse.
+
+**Endpoint:** `POST http://localhost:8001/graphql`
+
+### Queries
+
+| Query | Argumen | Keterangan |
+|-------|---------|------------|
+| `bookingByOrder` | `order_code: String!` | Cari booking berdasarkan order code |
+| `myBookings` | `user_id: String!` | Semua booking milik user tertentu |
+| `bookingsByConcert` | `concert_id: Int!` | Semua booking untuk konser tertentu |
+| `allBookings` | — | Daftar semua booking |
+
+### Contoh Query
+
+```graphql
+{
+  bookingByOrder(order_code: "ORD-20260615-AB12") {
+    id
+    order_code
+    concert_id
+    user_id
+    quantity
+    amount
+    status
+    created_at
+  }
+}
+```
+
 ## Format Pesan RabbitMQ (queue: `ticket_orders`)
 Payload yang dikirim ke antrean (direncanakan §8.4), dibawa oleh properti Job:
 ```json

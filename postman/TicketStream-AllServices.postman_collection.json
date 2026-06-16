@@ -1,0 +1,676 @@
+{
+	"info": {
+		"_postman_id": "ts-all-services-2026",
+		"name": "TicketStream — All Services (End-to-End)",
+		"description": "Koleksi Postman gabungan untuk semua 3 microservice TicketStream.\n\nAlur End-to-End:\n1. Browse konser via Hasura GraphQL (S1)\n2. Buat booking via REST / GraphQL (S2)\n3. Cek status booking via GraphQL (S2)\n4. Cek tiket via GraphQL (S3)\n\nPort:\n- S1 Hasura: 8080\n- S2 Booking: 8001\n- S3 Payment: 8002\n- RabbitMQ: 15672",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "S1 — Katalog Event (Hasura GraphQL)",
+			"item": [
+				{
+					"name": "1. Konser Tersedia (kuota > 0)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type",            "value": "application/json" },
+							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"{ concerts(where: {available_quota: {_gt: 0}}, order_by: {event_date: asc}) { id name venue event_date price available_quota artist { name genre } } }\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8080/v1/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["v1", "graphql"]
+						}
+					}
+				},
+				{
+					"name": "2. Cari Konser (filter genre + keyword)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type",            "value": "application/json" },
+							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"query CariKonser($genre: String, $keyword: String) { concerts(where: {_and: [{artist: {genre: {_eq: $genre}}}, {name: {_ilike: $keyword}}]}) { id name venue event_date price available_quota artist { name } } }\",\n  \"variables\": { \"genre\": \"Pop\", \"keyword\": \"%konser%\" }\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8080/v1/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["v1", "graphql"]
+						}
+					}
+				},
+				{
+					"name": "3. Detail Konser (by ID)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type",            "value": "application/json" },
+							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"{ concerts_by_pk(id: 1) { id name venue event_date price total_quota available_quota artist { id name genre } } }\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8080/v1/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["v1", "graphql"]
+						}
+					}
+				},
+				{
+					"name": "4. Statistik Katalog (aggregate)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type",            "value": "application/json" },
+							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"{ concerts_aggregate { aggregate { count sum { available_quota } } } }\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8080/v1/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["v1", "graphql"]
+						}
+					}
+				},
+				{
+					"name": "5. Kurangi Kuota (mutation anti-oversell)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type",            "value": "application/json" },
+							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"mutation KurangiKuota($id: Int!) { update_concerts(where: {id: {_eq: $id}, available_quota: {_gt: 0}}, _inc: {available_quota: -1}) { affected_rows returning { id name available_quota } } }\",\n  \"variables\": { \"id\": 1 }\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8080/v1/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["v1", "graphql"]
+						}
+					}
+				},
+				{
+					"name": "6. Set Kuota (reset untuk testing)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type",            "value": "application/json" },
+							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"mutation SetKuota($id: Int!, $quota: Int!) { update_concerts_by_pk(pk_columns: {id: $id}, _set: {available_quota: $quota}) { id name available_quota total_quota } }\",\n  \"variables\": { \"id\": 5, \"quota\": 2 }\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8080/v1/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["v1", "graphql"]
+						}
+					}
+				},
+				{
+					"name": "7. Tambah Konser Baru",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type",            "value": "application/json" },
+							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"mutation TambahKonser($name: String!, $artist_id: Int!, $venue: String!, $event_date: timestamptz!, $price: numeric!, $total_quota: Int!, $available_quota: Int!) { insert_concerts_one(object: {name: $name, artist_id: $artist_id, venue: $venue, event_date: $event_date, price: $price, total_quota: $total_quota, available_quota: $available_quota}) { id name artist { name } } }\",\n  \"variables\": { \"name\": \"Konser Spesial Tahun Baru\", \"artist_id\": 1, \"venue\": \"Monas, Jakarta\", \"event_date\": \"2026-12-31T20:00:00+07:00\", \"price\": 500000, \"total_quota\": 1000, \"available_quota\": 1000 }\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8080/v1/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["v1", "graphql"]
+						}
+					}
+				},
+				{
+					"name": "8. Artis dengan Konser",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type",            "value": "application/json" },
+							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"{ artists { id name genre concerts { id name event_date venue price available_quota } } }\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8080/v1/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["v1", "graphql"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "S2 — Booking & Queue (REST + GraphQL)",
+			"item": [
+				{
+					"name": "REST",
+					"item": [
+						{
+							"name": "1. Buat Booking",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",  "value": "application/json" },
+									{ "key": "Accept",        "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"concert_id\": 1,\n  \"user_id\": \"andi\",\n  \"quantity\": 2,\n  \"amount\": 1700000\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/api/bookings",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["api", "bookings"]
+								}
+							}
+						},
+						{
+							"name": "2. Cek Status Booking",
+							"request": {
+								"method": "GET",
+								"header": [
+									{ "key": "Accept", "value": "application/json" }
+								],
+								"url": {
+									"raw": "http://localhost:8001/api/bookings/ORD-20260615-XXXX",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["api", "bookings", "ORD-20260615-XXXX"]
+								}
+							}
+						},
+						{
+							"name": "3. Update Status (Callback S3)",
+							"request": {
+								"method": "PATCH",
+								"header": [
+									{ "key": "Content-Type",  "value": "application/json" },
+									{ "key": "Accept",        "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"status\": \"PROCESSED\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/api/bookings/ORD-20260615-XXXX/status",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["api", "bookings", "ORD-20260615-XXXX", "status"]
+								}
+							}
+						}
+					]
+				},
+				{
+					"name": "GraphQL",
+					"item": [
+						{
+							"name": "4. [GraphQL] Cek Booking by Order Code",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type", "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["graphql"]
+								}
+							}
+						},
+						{
+							"name": "5. [GraphQL] Semua Booking User",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type", "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ myBookings(user_id: \\\"andi\\\") { id order_code concert_id quantity amount status created_at } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["graphql"]
+								}
+							}
+						},
+						{
+							"name": "6. [GraphQL] Booking per Konser",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type", "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ bookingsByConcert(concert_id: 1) { id order_code user_id quantity amount status created_at } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["graphql"]
+								}
+							}
+						},
+						{
+							"name": "7. [GraphQL] Semua Booking",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type", "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ allBookings { id order_code concert_id user_id quantity amount status created_at } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["graphql"]
+								}
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "S3 — Payment & Ticket Issuing (GraphQL)",
+			"item": [
+				{
+					"name": "1. Cek Tiket by Order Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"{ ticketByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { id order_code concert_id user_id ticket_code status issued_at created_at } }\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8002/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8002",
+							"path": ["graphql"]
+						}
+					}
+				},
+				{
+					"name": "2. Cek Tiket by Ticket Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"{ ticket(ticket_code: \\\"TKT-2026-XXXXX\\\") { id order_code concert_id user_id ticket_code status issued_at created_at } }\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8002/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8002",
+							"path": ["graphql"]
+						}
+					}
+				},
+				{
+					"name": "3. Semua Tiket User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"{ myTickets(user_id: \\\"andi\\\") { id order_code concert_id user_id ticket_code status issued_at created_at } }\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8002/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8002",
+							"path": ["graphql"]
+						}
+					}
+				},
+				{
+					"name": "4. Cek Pembayaran by Order Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"query\": \"{ paymentByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { id order_code amount status paid_at created_at } }\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8002/graphql",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8002",
+							"path": ["graphql"]
+						}
+					}
+				},
+				{
+					"name": "5. Health Check",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "http://localhost:8002",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8002"
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "End-to-End Scenarios",
+			"item": [
+				{
+					"name": "Scenario: Happy Path",
+					"item": [
+						{
+							"name": "Step 1 — Browse Konser (S1)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",            "value": "application/json" },
+									{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ concerts(where: {available_quota: {_gt: 0}}, order_by: {event_date: asc}) { id name price available_quota artist { name } } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8080/v1/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8080",
+									"path": ["v1", "graphql"]
+								}
+							}
+						},
+						{
+							"name": "Step 2 — Buat Booking (S2 REST)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",  "value": "application/json" },
+									{ "key": "Accept",        "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"concert_id\": 1,\n  \"user_id\": \"andi\",\n  \"quantity\": 1,\n  \"amount\": 850000\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/api/bookings",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["api", "bookings"]
+								}
+							}
+						},
+						{
+							"name": "Step 3 — Cek Booking (S2 GraphQL)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type", "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { order_code status quantity amount } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["graphql"]
+								}
+							}
+						},
+						{
+							"name": "Step 4 — Cek Tiket (S3 GraphQL)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type", "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ ticketByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { order_code ticket_code status issued_at } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8002/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8002",
+									"path": ["graphql"]
+								}
+							}
+						},
+						{
+							"name": "Step 5 — Verifikasi Kuota Berkurang (S1)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",            "value": "application/json" },
+									{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ concerts_by_pk(id: 1) { id name available_quota total_quota } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8080/v1/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8080",
+									"path": ["v1", "graphql"]
+								}
+							}
+						}
+					]
+				},
+				{
+					"name": "Scenario: Sold Out (Anti-Overselling)",
+					"item": [
+						{
+							"name": "Step 0 — Reset Kuota Konser #5 ke 2",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",            "value": "application/json" },
+									{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"mutation { update_concerts_by_pk(pk_columns: {id: 5}, _set: {available_quota: 2}) { id name available_quota } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8080/v1/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8080",
+									"path": ["v1", "graphql"]
+								}
+							}
+						},
+						{
+							"name": "Step 1 — Booking #1 (concert_id=5)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",  "value": "application/json" },
+									{ "key": "Accept",        "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"concert_id\": 5,\n  \"user_id\": \"user-a\",\n  \"quantity\": 1,\n  \"amount\": 850000\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/api/bookings",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["api", "bookings"]
+								}
+							}
+						},
+						{
+							"name": "Step 2 — Booking #2 (concert_id=5)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",  "value": "application/json" },
+									{ "key": "Accept",        "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"concert_id\": 5,\n  \"user_id\": \"user-b\",\n  \"quantity\": 1,\n  \"amount\": 850000\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/api/bookings",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["api", "bookings"]
+								}
+							}
+						},
+						{
+							"name": "Step 3 — Booking #3 (concert_id=5, should SOLD_OUT)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",  "value": "application/json" },
+									{ "key": "Accept",        "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"concert_id\": 5,\n  \"user_id\": \"user-c\",\n  \"quantity\": 1,\n  \"amount\": 850000\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8001/api/bookings",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8001",
+									"path": ["api", "bookings"]
+								}
+							}
+						},
+						{
+							"name": "Step 4 — Cek Semua Tiket User-A (S3)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type", "value": "application/json" }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ myTickets(user_id: \\\"user-a\\\") { order_code ticket_code status } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8002/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8002",
+									"path": ["graphql"]
+								}
+							}
+						},
+						{
+							"name": "Step 5 — Verifikasi Kuota = 0 (S1)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{ "key": "Content-Type",            "value": "application/json" },
+									{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"query\": \"{ concerts_by_pk(id: 5) { id name available_quota total_quota } }\"\n}"
+								},
+								"url": {
+									"raw": "http://localhost:8080/v1/graphql",
+									"protocol": "http",
+									"host": ["localhost"],
+									"port": "8080",
+									"path": ["v1", "graphql"]
+								}
+							}
+						}
+					]
+				}
+			]
+		}
+	]
+}

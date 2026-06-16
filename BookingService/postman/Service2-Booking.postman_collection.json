@@ -2,7 +2,7 @@
   "info": {
     "name": "Service 2 - Booking & Queue",
     "_postman_id": "a1b2c3d4-0002-4000-8000-000000000002",
-    "description": "REST API Service 2 (Booking & Queue) untuk Sistem Pemesanan Tiket Konser. Menerima pesanan dan menerbitkannya ke antrean RabbitMQ.",
+    "description": "REST & GraphQL API Service 2 (Booking & Queue) untuk Sistem Pemesanan Tiket Konser. Menerima pesanan dan menerbitkannya ke antrean RabbitMQ.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -71,6 +71,82 @@
         "body": {
           "mode": "raw",
           "raw": "{\n  \"status\": \"PROCESSED\"\n}"
+        }
+      }
+    },
+    {
+      "name": "4. [GraphQL] Cek Booking by Order Code",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"{{order_code}}\\\") { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
+        }
+      }
+    },
+    {
+      "name": "5. [GraphQL] Semua Booking User",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"{ myBookings(user_id: \\\"andi\\\") { id order_code concert_id user_id quantity amount status created_at } }\"\n}"
+        }
+      }
+    },
+    {
+      "name": "6. [GraphQL] Booking per Konser",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"{ bookingsByConcert(concert_id: 5) { id order_code concert_id user_id quantity amount status created_at } }\"\n}"
+        }
+      }
+    },
+    {
+      "name": "7. [GraphQL] Semua Booking",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"{ allBookings { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
         }
       }
     }
