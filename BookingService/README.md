@@ -1,66 +1,101 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Service 2 — Booking & Queue
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Microservice **pintu masuk pemesanan tiket** untuk Sistem Pemesanan Tiket Konser.
+Dibangun dengan **Laravel 12 (REST API)** + **MySQL** + **RabbitMQ sebagai Publisher**.
 
-## About Laravel
+> Peran: menerima pesanan, mencatatnya dengan status `PENDING` secepat mungkin,
+> lalu **mempublikasikan pesan ke antrean RabbitMQ** `ticket_orders`. Pemrosesan
+> nyata (validasi kuota & penerbitan tiket) dilakukan oleh Service 3 (Consumer).
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Teknologi
+- Laravel 12 (PHP 8.3)
+- MySQL 8 — database `db_ticket_booking`
+- RabbitMQ — broker pesan (Publisher)
+- Paket: `vladimir-yuldashev/laravel-queue-rabbitmq`
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Struktur Kunci
+```
+app/
+├── Http/
+│   ├── Controllers/BookingController.php   # endpoint REST
+│   └── Requests/StoreBookingRequest.php    # validasi payload
+├── Jobs/ProcessTicketOrder.php             # Job → pesan RabbitMQ (IDENTIK dgn S3)
+└── Models/Booking.php
+database/migrations/*_create_bookings_table.php
+routes/api.php                              # POST/GET/PATCH /api/bookings
+config/queue.php                            # koneksi rabbitmq
+```
 
-## Learning Laravel
+---
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Endpoint REST
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+| Method | Endpoint | Body / Param | Respon |
+|--------|----------|--------------|--------|
+| `POST` | `/api/bookings` | `{ "concert_id": 5, "user_id": "andi", "quantity": 2, "amount": 1700000 }` | `202` `{ "message": "...", "order_code": "ORD-..." }` |
+| `GET` | `/api/bookings/{order_code}` | – | `200` `{ "order_code": "...", "status": "PENDING", ... }` |
+| `PATCH` | `/api/bookings/{order_code}/status` | `{ "status": "PROCESSED" }` | `200` (callback opsional dari S3) |
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### Contoh
+```bash
+# Buat pesanan
+curl -s -X POST http://localhost:8001/api/bookings \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{"concert_id":5,"user_id":"andi","quantity":2,"amount":1700000}'
 
-## Laravel Sponsors
+# Cek status
+curl -s http://localhost:8001/api/bookings/ORD-20260615-AB12
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Format Pesan RabbitMQ (queue: `ticket_orders`)
+Payload yang dikirim ke antrean (direncanakan §8.4), dibawa oleh properti Job:
+```json
+{
+  "order_code": "ORD-20260615-AB12",
+  "concert_id": 5,
+  "user_id": "andi",
+  "quantity": 2,
+  "amount": 1700000
+}
+```
+> Class Job `App\Jobs\ProcessTicketOrder` **harus identik** dengan yang ada di Service 3.
 
-### Premium Partners
+---
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+## Menjalankan
 
-## Contributing
+### Via Docker (lihat `docker-compose.yml` di root repo)
+```bash
+# dari root repo:
+docker compose up -d --build
+```
+Container `booking_service` ter-expose di **host port 8001**.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+### Lokal (tanpa Docker)
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate
+php artisan serve --port=8001
+```
+Pastikan MySQL & RabbitMQ dapat dijangkau, sesuaikan `DB_HOST`/`RABBITMQ_HOST` di `.env`.
 
-## Code of Conduct
+---
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Catatan Teknis
+- **Kuota TIDAK dikurangi di sini** (rencana §2.4) — pengurangan atomik dilakukan
+  Service 3 lewat mutation Hasura, agar tidak overselling.
+- Host RabbitMQ dari dalam container = `rabbitmq` (nama service di compose),
+  **bukan** `localhost`.
+- `QUEUE_CONNECTION=rabbitmq` agar `dispatch()` mengirim ke RabbitMQ.
 
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Troubleshooting
+- **Pesan tidak muncul di RabbitMQ** → cek `QUEUE_CONNECTION=rabbitmq` & host
+  RabbitMQ benar (`rabbitmq`); buka Management UI `http://localhost:15672`.
+- **422 saat POST** → field `concert_id`/`user_id`/`quantity` wajib & sesuai tipe.
+- **`composer install` gagal** (offline) → install dependensi lokal, lalu mount
+  folder `vendor/` ke container (lihat catatan build di README root).

@@ -1,0 +1,78 @@
+{
+  "info": {
+    "name": "Service 2 - Booking & Queue",
+    "_postman_id": "a1b2c3d4-0002-4000-8000-000000000002",
+    "description": "REST API Service 2 (Booking & Queue) untuk Sistem Pemesanan Tiket Konser. Menerima pesanan dan menerbitkannya ke antrean RabbitMQ.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8001" },
+    { "key": "order_code", "value": "ORD-20260615-AB12" }
+  ],
+  "item": [
+    {
+      "name": "POST /api/bookings (buat pesanan)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/bookings",
+          "host": ["{{base_url}}"],
+          "path": ["api", "bookings"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"concert_id\": 5,\n  \"user_id\": \"andi\",\n  \"quantity\": 2,\n  \"amount\": 1700000\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "var json = pm.response.json();",
+              "if (json.order_code) { pm.collectionVariables.set('order_code', json.order_code); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "GET /api/bookings/{order_code} (cek status)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/bookings/{{order_code}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "bookings", "{{order_code}}"]
+        }
+      }
+    },
+    {
+      "name": "PATCH /api/bookings/{order_code}/status (callback S3)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/bookings/{{order_code}}/status",
+          "host": ["{{base_url}}"],
+          "path": ["api", "bookings", "{{order_code}}", "status"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"PROCESSED\"\n}"
+        }
+      }
+    }
+  ]
+}
