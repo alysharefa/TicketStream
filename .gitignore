@@ -1,2 +1,16 @@
+# Environment files
+.env
+.env.backup
+.env.*.local
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation exclusions (keep README.md, ignore other .md at root)
 *.md
 !**/README.md

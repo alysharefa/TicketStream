@@ -1,66 +1,128 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Service 3 — Payment & Ticket Issuing
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Microservice **pemrosesan antrean & penerbitan tiket** untuk Sistem Pemesanan Tiket Konser.
+Dibangun dengan **Laravel 12 + Lighthouse (GraphQL manual)** + **MySQL** + **RabbitMQ sebagai Consumer/Worker**.
 
-## About Laravel
+> Peran: mengonsumsi pesan dari antrean RabbitMQ `ticket_orders` satu per satu,
+> mensimulasikan pembayaran, mengurangi kuota di Hasura secara atomik (anti-overselling),
+> lalu menerbitkan tiket. Hasilnya bisa dicek via GraphQL endpoint (`POST /graphql`).
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Teknologi
+- Laravel 12 (PHP 8.3)
+- **Lighthouse** — GraphQL server manual (skema & resolver ditulis sendiri)
+- MySQL 8 — database `db_ticket_issuing`
+- RabbitMQ — broker pesan (Consumer/Worker)
+- Paket: `nuwave/lighthouse`, `vladimir-yuldashev/laravel-queue-rabbitmq`
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Struktur Kunci
+```
+app/
+├── Jobs/ProcessTicketOrder.php          # Consumer job (IDENTIK class dgn S2, beda handle())
+├── Models/Ticket.php, Payment.php
+├── Services/HasuraService.php           # panggil mutation kuota ke S1 (anti-overselling)
+└── GraphQL/ (opsional resolver custom)
+graphql/schema.graphql                   # SDL Lighthouse (type, query, resolver directives)
+config/lighthouse.php                    # konfigurasi Lighthouse
+```
 
-## Learning Laravel
+---
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Endpoint GraphQL
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+Semua query via `POST http://localhost:8002/graphql` (Content-Type: application/json).
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### Skema Query
+```graphql
+type Query {
+  ticketByOrder(order_code: String!): Ticket
+  ticket(ticket_code: String!): Ticket
+  myTickets(user_id: String!): [Ticket!]!
+}
 
-## Laravel Sponsors
+type Ticket {
+  id: ID!
+  order_code: String!
+  ticket_code: String        # TKT-2026-XYZ99 (null bila gagal)
+  concert_id: Int!
+  user_id: String!
+  status: String!            # SUCCESS | FAILED | SOLD_OUT
+  issued_at: DateTime
+  created_at: DateTime
+}
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### Contoh
+```bash
+# Cek tiket berdasarkan order_code
+curl -s http://localhost:8002/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ ticketByOrder(order_code: \"ORD-20260615-AB12\") { id order_code ticket_code status issued_at } }"}'
 
-### Premium Partners
+# Cek tiket berdasarkan kode tiket
+curl -s http://localhost:8002/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ ticket(ticket_code: \"TKT-2026-XYZ99\") { id order_code status } }"}'
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+# Semua tiket milik user
+curl -s http://localhost:8002/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ myTickets(user_id: \"andi\") { order_code ticket_code status } }"}'
+```
 
-## Contributing
+---
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Alur Pemrosesan (handle Job)
 
-## Code of Conduct
+1. **Simulasi pembayaran** → catat Payment (PAID).
+2. **Kurangi kuota atomik** di Hasura via `HasuraService::decrementQuota()`:
+   - `affected_rows = 1` → kuota tersedia, lanjut terbitkan tiket.
+   - `affected_rows = 0` → **SOLD OUT**, tiket ditandai `SOLD_OUT`.
+3. **Terbitkan tiket** (jika sukses) → `TKT-YYYY-XXXXX`, simpan ke tabel `tickets`.
+4. **Callback opsional** ke Service 2 → `PATCH /api/bookings/{order_code}/status`.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+> **Anti-overselling (rencana §2.4):** pengurangan kuota dilakukan di CONSUMER
+> secara berurutan (satu per satu per iterasi), bukan di Publisher. Mutation Hasura
+> menggunakan syarat `where available_quota > 0` sehingga mustahil minus.
 
-## Security Vulnerabilities
+---
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Menjalankan
 
-## License
+### Via Docker (lihat `docker-compose.yml` di root repo)
+```bash
+# dari root repo:
+docker compose up -d --build
+```
+- `issuing_service` → GraphQL server di **host port 8002**.
+- `issuing_worker` → queue worker (tidak expose port, berjalan di background).
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### Lokal (tanpa Docker)
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate
+php artisan serve --port=8002 &         # GraphQL server
+php artisan queue:work rabbitmq --queue=ticket_orders --tries=3   # Worker
+```
+
+---
+
+## Catatan Teknis
+- **Class Job IDENTIK** dengan Service 2 — namespace, nama, properti, konstruktor sama.
+- Host Hasura dari container = `http://hasura:8080` (nama container di jaringan ticketing_net).
+- Worker dijalankan: `php artisan queue:work rabbitmq --queue=ticket_orders --tries=3`.
+- `--tries=3` → pesan gagal di-retry 3× sebelum masuk failed_jobs.
+- Format kode tiket: `TKT-YYYY-XXXXX` (5 karakter random uppercase).
+
+## Troubleshooting
+- **Worker tidak memproses pesan** → cek `QUEUE_CONNECTION=rabbitmq`, cek host
+  `rabbitmq` benar, buka Management UI `http://localhost:15672`.
+- **Tiket SOLD_OUT padahal kuota masih ada** → cek `HASURA_URL` & `HASURA_ADMIN_SECRET`
+  di `.env`, pastikan Hasura bisa dijangkau.
+- **GraphQL 500 / error** → jalankan `php artisan lighthouse:cache` atau cek
+  `graphql/schema.graphql` syntax-nya.
+- **`composer install` gagal** (offline) → install dependensi lokal, lalu mount
+  folder `vendor/` ke container (lihat catatan build di README root).

@@ -1,0 +1,51 @@
+"""
+Service 3 — Payment & Ticket Issuing (GraphQL Manual via Lighthouse).
+
+Skema ini mendefinisikan query untuk mengecek status tiket yang telah
+diproses oleh worker. Tipe & resolver ditulis MANUAL (bukan auto-generate),
+mendemonstrasikan pendekatan GraphQL "manual" berbeda dari Hasura (auto-generate
+di Service 1).
+
+Endpoint: POST http://localhost:8002/graphql
+"""
+
+# ----------------------------------------------------------------------
+# Types
+# ----------------------------------------------------------------------
+
+"""
+Tiket — hasil pemrosesan pesanan oleh worker Service 3.
+Dipetakan ke model Eloquent App\Models\Ticket.
+"""
+type Ticket @model(class: "App\\Models\\Ticket") {
+  id: ID!
+  order_code: String!
+  concert_id: Int!
+  user_id: String!
+  ticket_code: String
+  status: String!
+  issued_at: DateTime
+  created_at: DateTime
+}
+
+# ----------------------------------------------------------------------
+# Queries — mencari tiket berdasarkan order_code / ticket_code / user_id
+# ----------------------------------------------------------------------
+
+type Query {
+  """
+  Cari satu tiket berdasarkan order_code pesanan.
+  Bila satu pesanan menghasilkan beberapa tiket, mengembalikan yang pertama.
+  """
+  ticketByOrder(order_code: String! @eq): Ticket @find
+
+  """
+  Cari satu tiket berdasarkan kode tiket (TKT-2026-XYZ99).
+  """
+  ticket(ticket_code: String! @eq): Ticket @find
+
+  """
+  Semua tiket milik seorang user.
+  """
+  myTickets(user_id: String! @eq): [Ticket!]! @all
+}

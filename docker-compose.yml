@@ -1,0 +1,247 @@
+# =====================================================================
+# Sistem Pemesanan Tiket Konser — docker-compose.yml (All-in-One)
+#
+# Menjalankan SEMUA microservice + infrastruktur pendukung dalam satu
+# perintah:  docker compose up --build
+#
+# Container:
+#   S1: postgres_event + hasura          (Katalog Event, GraphQL auto)
+#   S2: mysql_booking + booking_service  (Booking REST + Publisher)
+#   S3: mysql_issuing + issuing_service
+#       + issuing_worker                 (GraphQL manual + Consumer)
+#   MQ: rabbitmq                         (Broker + Management UI)
+#
+# Akses setelah 'up':
+#   Hasura Console      : http://localhost:8080
+#   Booking REST (S2)   : http://localhost:8001
+#   GraphQL S3          : http://localhost:8002/graphql
+#   RabbitMQ Management : http://localhost:15672  (guest/guest)
+# =====================================================================
+
+services:
+
+  # ==================================================================
+  # Message Broker — RabbitMQ (broker + management UI)
+  # ==================================================================
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ticketing_net
+
+  # ==================================================================
+  # Service 1 — Katalog Event (Hasura + PostgreSQL)
+  # ==================================================================
+  postgres_event:
+    image: postgres:16
+    container_name: s1_postgres_event
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hasura}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hasurapassword}
+      POSTGRES_DB: ${POSTGRES_DB:-db_event_catalog}
+    volumes:
+      - postgres_event_data:/var/lib/postgresql/data
+      - ./KatalogService/db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hasura} -d ${POSTGRES_DB:-db_event_catalog}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ticketing_net
+
+  hasura:
+    image: hasura/graphql-engine:latest
+    container_name: s1_hasura
+    restart: unless-stopped
+    depends_on:
+      postgres_event:
+        condition: service_healthy
+    ports:
+      - "${HASURA_PORT:-8080}:8080"
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://${POSTGRES_USER:-hasura}:${POSTGRES_PASSWORD:-hasurapassword}@postgres_event:5432/${POSTGRES_DB:-db_event_catalog}
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-myadminsecret}
+      HASURA_GRAPHQL_ENABLED_LOG_TYPES: "startup, http-log, webhook-log, websocket-log, query-log"
+    networks:
+      - ticketing_net
+
+  # ==================================================================
+  # Service 2 — Booking & Queue (Laravel REST + MySQL + Publisher)
+  # ==================================================================
+  mysql_booking:
+    image: mysql:8
+    container_name: s2_mysql_booking
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_BOOKING_DB:-db_ticket_booking}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_BOOKING_PASSWORD:-secret}
+    volumes:
+      - mysql_booking_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_BOOKING_PASSWORD:-secret}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - ticketing_net
+
+  booking_service:
+    build:
+      context: ./BookingService
+      dockerfile: Dockerfile
+    container_name: s2_booking_service
+    restart: unless-stopped
+    depends_on:
+      mysql_booking:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "${BOOKING_PORT:-8001}:8000"
+    environment:
+      APP_NAME: BookingService
+      APP_ENV: local
+      APP_KEY: ${BOOKING_APP_KEY:-}
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:${BOOKING_PORT:-8001}
+      DB_CONNECTION: mysql
+      DB_HOST: mysql_booking
+      DB_PORT: "3306"
+      DB_DATABASE: ${MYSQL_BOOKING_DB:-db_ticket_booking}
+      DB_USERNAME: root
+      DB_PASSWORD: ${MYSQL_BOOKING_PASSWORD:-secret}
+      QUEUE_CONNECTION: rabbitmq
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_VHOST: "/"
+      RABBITMQ_QUEUE: ticket_orders
+    networks:
+      - ticketing_net
+
+  # ==================================================================
+  # Service 3 — Payment & Ticket Issuing (Lighthouse + MySQL + Consumer)
+  # ==================================================================
+  mysql_issuing:
+    image: mysql:8
+    container_name: s3_mysql_issuing
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_ISSUING_DB:-db_ticket_issuing}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ISSUING_PASSWORD:-secret}
+    volumes:
+      - mysql_issuing_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ISSUING_PASSWORD:-secret}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - ticketing_net
+
+  issuing_service:
+    build:
+      context: ./PaymentService
+      dockerfile: Dockerfile
+    container_name: s3_issuing_service
+    restart: unless-stopped
+    depends_on:
+      mysql_issuing:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "${ISSUING_PORT:-8002}:8000"
+    environment:
+      APP_NAME: PaymentService
+      APP_ENV: local
+      APP_KEY: ${ISSUING_APP_KEY:-}
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:${ISSUING_PORT:-8002}
+      DB_CONNECTION: mysql
+      DB_HOST: mysql_issuing
+      DB_PORT: "3306"
+      DB_DATABASE: ${MYSQL_ISSUING_DB:-db_ticket_issuing}
+      DB_USERNAME: root
+      DB_PASSWORD: ${MYSQL_ISSUING_PASSWORD:-secret}
+      QUEUE_CONNECTION: rabbitmq
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_VHOST: "/"
+      RABBITMQ_QUEUE: ticket_orders
+      HASURA_URL: http://hasura:8080/v1/graphql
+      HASURA_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-myadminsecret}
+      BOOKING_SERVICE_URL: http://booking_service:8000/api/bookings
+    networks:
+      - ticketing_net
+
+  issuing_worker:
+    build:
+      context: ./PaymentService
+      dockerfile: Dockerfile
+    container_name: s3_issuing_worker
+    restart: unless-stopped
+    depends_on:
+      mysql_issuing:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: php artisan queue:work rabbitmq --queue=ticket_orders --tries=3 --sleep=1
+    environment:
+      APP_NAME: PaymentService
+      APP_ENV: local
+      APP_KEY: ${ISSUING_APP_KEY:-}
+      APP_DEBUG: "true"
+      DB_CONNECTION: mysql
+      DB_HOST: mysql_issuing
+      DB_PORT: "3306"
+      DB_DATABASE: ${MYSQL_ISSUING_DB:-db_ticket_issuing}
+      DB_USERNAME: root
+      DB_PASSWORD: ${MYSQL_ISSUING_PASSWORD:-secret}
+      QUEUE_CONNECTION: rabbitmq
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_VHOST: "/"
+      RABBITMQ_QUEUE: ticket_orders
+      HASURA_URL: http://hasura:8080/v1/graphql
+      HASURA_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-myadminsecret}
+      BOOKING_SERVICE_URL: http://booking_service:8000/api/bookings
+    networks:
+      - ticketing_net
+
+# =====================================================================
+# Volumes — data persisten
+# =====================================================================
+volumes:
+  postgres_event_data:
+  mysql_booking_data:
+  mysql_issuing_data:
+
+# =====================================================================
+# Network — jaringan bersama (named agar service lain bisa join)
+# =====================================================================
+networks:
+  ticketing_net:
+    name: ticketing_net
+    driver: bridge

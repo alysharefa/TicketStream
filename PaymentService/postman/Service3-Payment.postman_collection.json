@@ -1,0 +1,161 @@
+{
+  "info": {
+    "name": "Service 3 - Payment & Ticket Issuing (Lighthouse GraphQL)",
+    "_postman_id": "a1b2c3d4-0003-4000-8000-000000000003",
+    "description": "Koleksi untuk menguji API GraphQL Service 3 (Payment & Ticket Issuing).\n\nSetup: jalankan `docker compose up -d --build` dari root repo.\nVariabel koleksi:\n- base_url : http://localhost:8002\n\nSemua request memakai body mode GraphQL ke endpoint /graphql.\nData tiket tercipta otomatis saat worker mengonsumsi antrean dari Service 2.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8002"
+    },
+    {
+      "key": "order_code",
+      "value": "ORD-20260615-AB12"
+    },
+    {
+      "key": "ticket_code",
+      "value": "TKT-2026-XYZ99"
+    },
+    {
+      "key": "user_id",
+      "value": "andi"
+    }
+  ],
+  "item": [
+    {
+      "name": "Query - Tiket by Order Code",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query TicketByOrder($order_code: String!) {\n  ticketByOrder(order_code: $order_code) {\n    id\n    order_code\n    ticket_code\n    concert_id\n    user_id\n    status\n    issued_at\n    created_at\n  }\n}",
+            "variables": "{\n  \"order_code\": \"{{order_code}}\"\n}"
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "var json = pm.response.json();",
+              "if (json && json.data && json.data.ticketByOrder && json.data.ticketByOrder.ticket_code) {",
+              "  pm.collectionVariables.set('ticket_code', json.data.ticketByOrder.ticket_code);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query - Tiket by Ticket Code",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query TicketByCode($ticket_code: String!) {\n  ticket(ticket_code: $ticket_code) {\n    id\n    order_code\n    ticket_code\n    concert_id\n    user_id\n    status\n    issued_at\n    created_at\n  }\n}",
+            "variables": "{\n  \"ticket_code\": \"{{ticket_code}}\"\n}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Query - Semua Tiket User",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query MyTickets($user_id: String!) {\n  myTickets(user_id: $user_id) {\n    id\n    order_code\n    ticket_code\n    concert_id\n    status\n    issued_at\n  }\n}",
+            "variables": "{\n  \"user_id\": \"{{user_id}}\"\n}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Query - Tiket by Order (raw JSON)",
+      "description": "Alternatif via raw JSON body (tanpa GraphQL mode Postman), berguna untuk scripting/CI.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"{ ticketByOrder(order_code: \\\"{{order_code}}\\\") { id order_code ticket_code status issued_at } }\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Introspection - Skema GraphQL",
+      "description": "Introspeksi skema GraphQL untuk melihat semua type dan query yang tersedia.",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/graphql",
+          "host": ["{{base_url}}"],
+          "path": ["graphql"]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query Introspection {\n  __schema {\n    queryType { name }\n    types {\n      name\n      kind\n      fields {\n        name\n        type { name kind }\n      }\n    }\n  }\n}",
+            "variables": "{}"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -35,4 +35,25 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Hasura (Service 1 - Katalog Event)
+    |--------------------------------------------------------------------------
+    | Endpoint GraphQL Service 1. Dipanggil worker untuk mutation kuota atomik.
+    */
+    'hasura' => [
+        'url' => env('HASURA_URL', 'http://hasura:8080/v1/graphql'),
+        'admin_secret' => env('HASURA_ADMIN_SECRET', 'myadminsecret'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Booking Service (Service 2)
+    |--------------------------------------------------------------------------
+    | Dipakai worker untuk callback update status booking (opsional).
+    */
+    'booking_service' => [
+        'url' => env('BOOKING_SERVICE_URL', 'http://booking_service:8000/api/bookings'),
+    ],
+
 ];
