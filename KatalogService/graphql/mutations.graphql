@@ -1,0 +1,61 @@
+# ============================================================
+# Service 1 - Contoh Mutation GraphQL (Hasura)
+# Endpoint : POST http://localhost:8080/v1/graphql
+# Header   : x-hasura-admin-secret: myadminsecret
+# ============================================================
+
+# 1) [PENTING] Kurangi kuota secara ATOMIK.
+#    Inilah mutation yang dipanggil Service 3 (Worker) saat menerbitkan tiket.
+#    Syarat { available_quota: { _gt: 0 } } memastikan kuota tidak pernah minus.
+#      - affected_rows = 1  -> berhasil, tiket boleh diterbitkan
+#      - affected_rows = 0  -> kuota habis (SOLD OUT), pesanan ditolak
+#    Variables: { "id": 5 }
+mutation KurangiKuota($id: Int!) {
+  update_concerts(
+    where: { id: { _eq: $id }, available_quota: { _gt: 0 } }
+    _inc: { available_quota: -1 }
+  ) {
+    affected_rows
+    returning {
+      id
+      name
+      available_quota
+    }
+  }
+}
+
+# 2) Tambah konser baru (operasi admin).
+#    Variables:
+#    {
+#      "name": "Konser Amal 2026", "artist_id": 1, "venue": "Istora Senayan",
+#      "event_date": "2026-12-31T20:00:00+07:00", "price": 350000, "quota": 800
+#    }
+mutation TambahKonser(
+  $name: String!, $artist_id: Int!, $venue: String!,
+  $event_date: timestamptz!, $price: numeric!, $quota: Int!
+) {
+  insert_concerts_one(object: {
+    name: $name,
+    artist_id: $artist_id,
+    venue: $venue,
+    event_date: $event_date,
+    price: $price,
+    total_quota: $quota,
+    available_quota: $quota
+  }) {
+    id
+    name
+  }
+}
+
+# 3) Set ulang kuota ke nilai tertentu (berguna untuk mengulang demo/pengujian).
+#    Variables: { "id": 5, "quota": 2 }
+mutation SetKuota($id: Int!, $quota: Int!) {
+  update_concerts(
+    where: { id: { _eq: $id } }
+    _set: { available_quota: $quota }
+  ) {
+    affected_rows
+    returning { id name available_quota }
+  }
+}

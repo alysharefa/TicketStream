@@ -1,0 +1,59 @@
+# =====================================================================
+# Service 1 - Manajemen & Katalog Event
+# Stack: Hasura GraphQL Engine + PostgreSQL
+#
+# Jalankan:
+#   docker compose up -d
+#   bash hasura/apply-metadata.sh
+# =====================================================================
+
+services:
+  postgres_event:
+    image: postgres:16
+    container_name: s1_postgres_event
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hasura}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hasurapassword}
+      POSTGRES_DB: ${POSTGRES_DB:-db_event_catalog}
+    volumes:
+      - postgres_event_data:/var/lib/postgresql/data
+      # Skrip di folder ini berjalan OTOMATIS saat database pertama kali dibuat:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hasura} -d ${POSTGRES_DB:-db_event_catalog}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ticketing_net
+
+  hasura:
+    # Catatan: 'latest' = versi v2 stabil terbaru. Untuk produksi, pin ke versi spesifik
+    # (mis. hasura/graphql-engine:v2.42.0). Lihat https://hub.docker.com/r/hasura/graphql-engine/tags
+    image: hasura/graphql-engine:latest
+    container_name: s1_hasura
+    restart: unless-stopped
+    depends_on:
+      postgres_event:
+        condition: service_healthy
+    ports:
+      - "${HASURA_PORT:-8080}:8080"
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://${POSTGRES_USER:-hasura}:${POSTGRES_PASSWORD:-hasurapassword}@postgres_event:5432/${POSTGRES_DB:-db_event_catalog}
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-myadminsecret}
+      HASURA_GRAPHQL_ENABLED_LOG_TYPES: "startup, http-log, webhook-log, websocket-log, query-log"
+    networks:
+      - ticketing_net
+
+volumes:
+  postgres_event_data:
+
+# Jaringan diberi nama eksplisit agar Service 2 & 3 (di compose lain) bisa bergabung
+# ke jaringan yang sama dan memanggil Hasura via host "http://hasura:8080".
+networks:
+  ticketing_net:
+    name: ticketing_net
+    driver: bridge

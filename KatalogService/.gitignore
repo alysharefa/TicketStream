@@ -1,0 +1,8 @@
+# Konfigurasi lokal
+.env
+
+# Volume data Postgres (jika ter-bind ke folder)
+postgres_event_data/
+
+# Log
+*.log

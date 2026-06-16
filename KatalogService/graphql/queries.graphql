@@ -1,0 +1,92 @@
+# ============================================================
+# Service 1 - Contoh Query GraphQL (Hasura)
+# Endpoint : POST http://localhost:8080/v1/graphql
+# Header   : x-hasura-admin-secret: myadminsecret
+# ============================================================
+
+# 1) Daftar konser yang masih tersedia (kuota > 0), diurutkan tanggal.
+#    Query utama untuk halaman "Jelajah Konser".
+query KonserTersedia {
+  concerts(
+    where: { available_quota: { _gt: 0 } }
+    order_by: { event_date: asc }
+  ) {
+    id
+    name
+    venue
+    event_date
+    price
+    available_quota
+    artist {
+      name
+      genre
+    }
+  }
+}
+
+# 2) Filter berdasarkan genre artis + cari nama konser (ILIKE).
+#    Variables: { "genre": "Pop", "keyword": "%tour%" }
+query CariKonser($genre: String!, $keyword: String!) {
+  concerts(
+    where: {
+      artist: { genre: { _eq: $genre } }
+      name: { _ilike: $keyword }
+    }
+    order_by: { price: asc }
+  ) {
+    id
+    name
+    price
+    available_quota
+    artist { name genre }
+  }
+}
+
+# 3) Detail satu konser berdasarkan id.
+#    Variables: { "id": 1 }
+query DetailKonser($id: Int!) {
+  concerts_by_pk(id: $id) {
+    id
+    name
+    venue
+    event_date
+    price
+    total_quota
+    available_quota
+    artist { id name genre }
+  }
+}
+
+# 4) Semua artis beserta daftar konsernya (relasi array).
+query ArtisDenganKonser {
+  artists(order_by: { name: asc }) {
+    id
+    name
+    genre
+    concerts(order_by: { event_date: asc }) {
+      name
+      event_date
+      available_quota
+    }
+  }
+}
+
+# 5) Statistik agregat: jumlah konser & total sisa kuota.
+query StatistikKatalog {
+  concerts_aggregate {
+    aggregate {
+      count
+      sum { available_quota }
+    }
+  }
+}
+
+# 6) Pagination (5 konser per halaman, halaman pertama).
+#    Variables: { "limit": 5, "offset": 0 }
+query KonserPaginasi($limit: Int!, $offset: Int!) {
+  concerts(limit: $limit, offset: $offset, order_by: { id: asc }) {
+    id
+    name
+    price
+  }
+}

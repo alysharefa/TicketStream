@@ -1,0 +1,284 @@
+{
+  "info": {
+    "name": "Service 1 - Event Catalog (Hasura GraphQL)",
+    "_postman_id": "a1b2c3d4-0001-4a1a-9e1e-svc1eventcat01",
+    "description": "Koleksi untuk menguji API GraphQL Service 1 (Katalog Event).\n\nSetup: jalankan `docker compose up -d` lalu `bash hasura/apply-metadata.sh`.\nVariabel koleksi:\n- base_url     : http://localhost:8080\n- admin_secret : myadminsecret\n\nSemua request memakai body mode GraphQL ke endpoint /v1/graphql.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "admin_secret",
+      "value": "myadminsecret"
+    }
+  ],
+  "item": [
+    {
+      "name": "Query - Konser Tersedia",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-hasura-admin-secret",
+            "value": "{{admin_secret}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/graphql",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "graphql"
+          ]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query KonserTersedia {\n  concerts(where: {available_quota: {_gt: 0}}, order_by: {event_date: asc}) {\n    id\n    name\n    venue\n    event_date\n    price\n    available_quota\n    artist { name genre }\n  }\n}",
+            "variables": "{}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Query - Cari Konser (filter genre + keyword)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-hasura-admin-secret",
+            "value": "{{admin_secret}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/graphql",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "graphql"
+          ]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query CariKonser($genre: String!, $keyword: String!) {\n  concerts(where: {artist: {genre: {_eq: $genre}}, name: {_ilike: $keyword}}, order_by: {price: asc}) {\n    id\n    name\n    price\n    available_quota\n    artist { name genre }\n  }\n}",
+            "variables": "{\"genre\": \"Pop\", \"keyword\": \"%tour%\"}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Query - Detail Konser by ID",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-hasura-admin-secret",
+            "value": "{{admin_secret}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/graphql",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "graphql"
+          ]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query DetailKonser($id: Int!) {\n  concerts_by_pk(id: $id) {\n    id\n    name\n    venue\n    event_date\n    price\n    total_quota\n    available_quota\n    artist { id name genre }\n  }\n}",
+            "variables": "{\"id\": 1}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Query - Artis dengan Konser",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-hasura-admin-secret",
+            "value": "{{admin_secret}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/graphql",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "graphql"
+          ]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query ArtisDenganKonser {\n  artists(order_by: {name: asc}) {\n    id\n    name\n    genre\n    concerts(order_by: {event_date: asc}) {\n      name\n      event_date\n      available_quota\n    }\n  }\n}",
+            "variables": "{}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Query - Statistik Katalog (aggregate)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-hasura-admin-secret",
+            "value": "{{admin_secret}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/graphql",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "graphql"
+          ]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "query StatistikKatalog {\n  concerts_aggregate {\n    aggregate {\n      count\n      sum { available_quota }\n    }\n  }\n}",
+            "variables": "{}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Mutation - Kurangi Kuota (dipakai Service 3)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-hasura-admin-secret",
+            "value": "{{admin_secret}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/graphql",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "graphql"
+          ]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation KurangiKuota($id: Int!) {\n  update_concerts(where: {id: {_eq: $id}, available_quota: {_gt: 0}}, _inc: {available_quota: -1}) {\n    affected_rows\n    returning { id name available_quota }\n  }\n}",
+            "variables": "{\"id\": 5}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Mutation - Tambah Konser (admin)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-hasura-admin-secret",
+            "value": "{{admin_secret}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/graphql",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "graphql"
+          ]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation TambahKonser($name: String!, $artist_id: Int!, $venue: String!, $event_date: timestamptz!, $price: numeric!, $quota: Int!) {\n  insert_concerts_one(object: {name: $name, artist_id: $artist_id, venue: $venue, event_date: $event_date, price: $price, total_quota: $quota, available_quota: $quota}) {\n    id\n    name\n  }\n}",
+            "variables": "{\"name\": \"Konser Amal 2026\", \"artist_id\": 1, \"venue\": \"Istora Senayan\", \"event_date\": \"2026-12-31T20:00:00+07:00\", \"price\": 350000, \"quota\": 800}"
+          }
+        }
+      }
+    },
+    {
+      "name": "Mutation - Set Kuota (reset untuk pengujian)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-hasura-admin-secret",
+            "value": "{{admin_secret}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/v1/graphql",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "v1",
+            "graphql"
+          ]
+        },
+        "body": {
+          "mode": "graphql",
+          "graphql": {
+            "query": "mutation SetKuota($id: Int!, $quota: Int!) {\n  update_concerts(where: {id: {_eq: $id}}, _set: {available_quota: $quota}) {\n    affected_rows\n    returning { id name available_quota }\n  }\n}",
+            "variables": "{\"id\": 5, \"quota\": 2}"
+          }
+        }
+      }
+    }
+  ]
+}
