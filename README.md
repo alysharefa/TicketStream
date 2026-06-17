@@ -34,7 +34,7 @@ Client/Postman
 
 ```
 1. Client         ──► query konser (GraphQL S1/Hasura)
-2. Client         ──► POST /api/bookings (REST S2) atau createBooking (GraphQL S2)
+2. Client         ──► POST /api/bookings (REST S2)
 3. S2 Booking     ──► publish pesan ke RabbitMQ
 4. S3 Worker      ──► consume pesan (berurutan, 1 per 1)
 5. S3 Worker      ──► mutation kurangi kuota (GraphQL S1/Hasura)
@@ -117,7 +117,7 @@ lalu **Track All** pada tabel `artists` dan `concerts`.
 |---------|-----|------|
 | Hasura Console | http://localhost:8080 | Buka console, lihat tabel |
 | Booking REST | http://localhost:8001/api/bookings | POST pesanan |
-| Booking GraphQL | http://localhost:8001/graphql | Query booking |
+| Booking GraphQL | http://localhost:8001/graphql | Query status booking |
 | GraphQL S3 | http://localhost:8002/graphql | Query tiket |
 | RabbitMQ UI | http://localhost:15672 | Login guest/guest |
 
