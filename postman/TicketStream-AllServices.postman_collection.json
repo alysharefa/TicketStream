@@ -187,6 +187,23 @@
 					"item": [
 						{
 							"name": "1. Buat Booking",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"var jsonData = pm.response.json();",
+											"if (jsonData.order_code) {",
+											"    pm.collectionVariables.set('order_code', jsonData.order_code);",
+											"}",
+											"pm.test('Status 202 Accepted', function () {",
+											"    pm.response.to.have.status(202);",
+											"});"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -214,11 +231,11 @@
 									{ "key": "Accept", "value": "application/json" }
 								],
 								"url": {
-									"raw": "http://localhost:8001/api/bookings/ORD-20260615-XXXX",
+									"raw": "http://localhost:8001/api/bookings/{{order_code}}",
 									"protocol": "http",
 									"host": ["localhost"],
 									"port": "8001",
-									"path": ["api", "bookings", "ORD-20260615-XXXX"]
+									"path": ["api", "bookings", "{{order_code}}"]
 								}
 							}
 						},
@@ -235,11 +252,11 @@
 									"raw": "{\n  \"status\": \"PROCESSED\"\n}"
 								},
 								"url": {
-									"raw": "http://localhost:8001/api/bookings/ORD-20260615-XXXX/status",
+									"raw": "http://localhost:8001/api/bookings/{{order_code}}/status",
 									"protocol": "http",
 									"host": ["localhost"],
 									"port": "8001",
-									"path": ["api", "bookings", "ORD-20260615-XXXX", "status"]
+									"path": ["api", "bookings", "{{order_code}}", "status"]
 								}
 							}
 						}
@@ -257,7 +274,7 @@
 								],
 								"body": {
 									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
+									"raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"{{order_code}}\\\") { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
 								},
 								"url": {
 									"raw": "http://localhost:8001/graphql",

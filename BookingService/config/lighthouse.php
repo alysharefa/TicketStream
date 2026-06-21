@@ -11,10 +11,7 @@ return [
     | Route Configuration
     |--------------------------------------------------------------------------
     */
-    'route' => [
-        'prefix' => 'graphql',
-        'middleware' => ['api'],
-    ],
+    'route' => false,
 
     /*
     |--------------------------------------------------------------------------
@@ -53,6 +50,6 @@ return [
     'security' => [
         'max_query_complexity' => 100,
         'max_query_depth' => 10,
-        'disable_introspection' => false,
+        'disable_introspection' => 0,
     ],
 ];
