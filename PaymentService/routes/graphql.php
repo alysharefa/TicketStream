@@ -1,16 +1,25 @@
 <?php
 
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+use Nuwave\Lighthouse\Http\GraphQLController;
+
 /*
 |----------------------------------------------------------------------
-| GraphQL Routes — Service 3 (Payment & Ticket Issuing)
+| GraphQL endpoint — Lighthouse (manual route untuk kompatibilitas Laravel 12)
+| Lighthouse auto-route dinonaktifkan di config/lighthouse.php.
+| Route ini mendelegasikan ke GraphQLController melalui container
+| agar dependency injection method-level berjalan dengan benar.
 |----------------------------------------------------------------------
-|
-| Endpoint GraphQL ditangani secara otomatis oleh paket Lighthouse
-| berdasarkan konfigurasi di config/lighthouse.php dan skema SDL
-| di graphql/schema.graphql.
-|
-| Endpoint: POST /graphql  (prefix 'graphql', middleware 'api')
-|
-| File ini dibiarkan kosong karena Lighthouse mendaftarkan route-nya
-| sendiri melalui service provider-nya.
 */
+Route::match(['GET', 'POST'], '/graphql', function (Request $request) {
+    $controller = app(GraphQLController::class);
+    return $controller->__invoke(
+        $request,
+        app(\Nuwave\Lighthouse\GraphQL::class),
+        app(\Illuminate\Contracts\Events\Dispatcher::class),
+        app(\Laragraph\Utils\RequestParser::class),
+        app(\Nuwave\Lighthouse\Support\Contracts\CreatesResponse::class),
+        app(\Nuwave\Lighthouse\Support\Contracts\CreatesContext::class),
+    );
+});

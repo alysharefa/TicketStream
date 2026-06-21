@@ -39,4 +39,4 @@ RUN mkdir -p storage/framework/{cache,sessions,views} \
 EXPOSE 8000
 
 # Startup: cache config, migrasi, lalu serve.
-CMD ["sh", "-c", "php artisan config:cache && php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"]
+CMD ["sh", "-c", "cp -n .env.example .env 2>/dev/null; php artisan key:generate --force 2>/dev/null; php artisan config:cache && php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"]

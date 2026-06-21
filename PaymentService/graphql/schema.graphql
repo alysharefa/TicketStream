@@ -1,13 +1,15 @@
 """
-Service 3 — Payment & Ticket Issuing (GraphQL Manual via Lighthouse).
+Service 3 — Payment and Ticket Issuing (GraphQL Manual via Lighthouse).
 
 Skema ini mendefinisikan query untuk mengecek status tiket yang telah
-diproses oleh worker. Tipe & resolver ditulis MANUAL (bukan auto-generate),
-mendemonstrasikan pendekatan GraphQL "manual" berbeda dari Hasura (auto-generate
+diproses oleh worker. Tipe dan resolver ditulis MANUAL (bukan auto-generate),
+mendemonstrasikan pendekatan GraphQL manual berbeda dari Hasura (auto-generate
 di Service 1).
 
 Endpoint: POST http://localhost:8002/graphql
 """
+
+scalar DateTime @scalar(class: "Nuwave\\Lighthouse\\Schema\\Types\\Scalars\\DateTime")
 
 # ----------------------------------------------------------------------
 # Types
@@ -25,6 +27,19 @@ type Ticket @model(class: "App\\Models\\Ticket") {
   ticket_code: String
   status: String!
   issued_at: DateTime
+  created_at: DateTime
+}
+
+"""
+Payment — catatan pembayaran pesanan.
+Dipetakan ke model Eloquent App\Models\Payment.
+"""
+type Payment @model(class: "App\\Models\\Payment") {
+  id: ID!
+  order_code: String!
+  amount: Int!
+  status: String!
+  paid_at: DateTime
   created_at: DateTime
 }
 
@@ -48,4 +63,9 @@ type Query {
   Semua tiket milik seorang user.
   """
   myTickets(user_id: String! @eq): [Ticket!]! @all
+
+  """
+  Cek pembayaran berdasarkan order_code.
+  """
+  paymentByOrder(order_code: String! @eq): Payment @find
 }
