@@ -36,10 +36,6 @@ class ProcessTicketOrder implements ShouldQueue
     public int $quantity;
     public int $amount;
 
-    // Koneksi & queue dipilih dari config; dipakai oleh dispatch() di S2.
-    public $connection = 'rabbitmq';
-    public $queue = 'ticket_orders';
-
     public int $tries = 3;
 
     /**
@@ -61,6 +57,10 @@ class ProcessTicketOrder implements ShouldQueue
         $this->user_id = $user_id;
         $this->quantity = $quantity;
         $this->amount = $amount;
+
+        // Set koneksi & queue via trait methods (menghindari konflik properti).
+        $this->onConnection('rabbitmq');
+        $this->onQueue('ticket_orders');
     }
 
     /**

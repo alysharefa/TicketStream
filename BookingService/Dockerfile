@@ -4,14 +4,15 @@
 # =====================================================================
 FROM php:8.3-cli
 
-# Ekstensi yang dibutuhkan Laravel + RabbitMQ + MySQL.
+# Ekstensi yang dibutuhkan Laravel + RabbitMQ + MySQL + PostgreSQL.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libzip-dev \
+        libpq-dev \
         zip \
         unzip \
         git \
-    && docker-php-ext-install pdo_mysql pdo_pgsql zip bcmath opcache pcntl \
+    && docker-php-ext-install pdo_mysql pdo_pgsql zip bcmath opcache pcntl sockets \
     && rm -rf /var/lib/apt/lists/*
 
 # Composer (copy dari image resmi agar versi konsisten).
@@ -19,13 +20,16 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
-# Install dependensi lebih dulu (layer cache lebih baik).
-COPY composer.json composer.lock* ./
-RUN composer install --no-dev --optimize-autoloader --no-interaction || \
-    composer install --no-interaction
-
-# Copy seluruh kode aplikasi.
+# Copy seluruh kode aplikasi terlebih dahulu (agar artisan tersedia).
 COPY . .
+
+# Install dependensi. Gunakan --no-scripts dulu, lalu jalankan scripts setelahnya.
+# Jika composer.lock ada dan sinkron, gunakan install. Jika tidak, fallback ke update.
+RUN composer install --no-dev --optimize-autoloader --no-interaction --no-scripts 2>/dev/null \
+    || composer update --no-dev --optimize-autoloader --no-interaction --no-scripts
+
+# Jalankan post-install scripts sekarang (artisan sudah tersedia).
+RUN composer dump-autoload --optimize 2>/dev/null || true
 
 # Pastikan folder runtime ada & writable.
 RUN mkdir -p storage/framework/{cache,sessions,views} \
