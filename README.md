@@ -67,59 +67,35 @@ Client/Postman
 
 ## Cara Menjalankan
 
-### 1. Clone & konfigurasi
+### 1. Clone & jalankan
 
 ```bash
 git clone <repo-url> TicketStream
 cd TicketStream
-cp .env.example .env
-```
-
-### 2. Generate APP_KEY untuk S2 dan S3
-
-Laravel membutuhkan `APP_KEY`. Jalankan di terminal:
-
-```bash
-# Untuk BookingService
-cd BookingService && composer install && php artisan key:generate --show && cd ..
-# Copy output-nya ke BOOKING_APP_KEY di .env root
-
-# Untuk PaymentService
-cd PaymentService && composer install && php artisan key:generate --show && cd ..
-# Copy output-nya ke ISSUING_APP_KEY di .env root
-```
-
-> **Alternatif cepat:** biarkan `APP_KEY` kosong, service akan tetap berjalan
-> (hanya warning). Untuk demo/testing ini tidak masalah.
-
-### 3. Jalankan semua service
-
-```bash
 docker compose up --build -d
 ```
 
 Tunggu hingga semua container healthy (sekitar 1-2 menit pertama kali).
+Semua konfigurasi sudah memiliki default value — **tidak perlu** menyalin `.env`
+atau generate APP_KEY secara manual.
 
-### 4. Setup metadata Hasura (sekali saja)
+> **Opsional:** Jika ingin mengubah port atau password, salin `.env.example`
+> menjadi `.env` dan sesuaikan nilainya:
+> ```bash
+> cp .env.example .env
+> ```
 
-```bash
-cd KatalogService
-bash hasura/apply-metadata.sh
-cd ..
-```
+### 2. Verifikasi
 
-Atau buka **Hasura Console** di http://localhost:8080, masuk ke tab **Data**,
-lalu **Track All** pada tabel `artists` dan `concerts`.
+Setelah semua container running, akses:
 
-### 5. Verifikasi
-
-| Service | URL | Test |
-|---------|-----|------|
-| Hasura Console | http://localhost:8080 | Buka console, lihat tabel |
-| Booking REST | http://localhost:8001/api/bookings | POST pesanan |
-| Booking GraphQL | http://localhost:8001/graphql | Query status booking |
-| GraphQL S3 | http://localhost:8002/graphql | Query tiket |
-| RabbitMQ UI | http://localhost:15672 | Login guest/guest |
+| Service | URL | Kredensial |
+|---------|-----|------------|
+| Hasura Console | http://localhost:8080 | Admin Secret: `myadminsecret` |
+| Booking REST | http://localhost:8001/api/bookings | — |
+| Booking GraphQL | http://localhost:8001/graphql | — |
+| GraphQL S3 | http://localhost:8002/graphql | — |
+| RabbitMQ Management | http://localhost:15672 | Username: `guest` / Password: `guest` |
 
 ---
 
@@ -291,7 +267,13 @@ docker compose ps  # cek kolom STATUS = "healthy"
   ```
 
 ### Hasura: tabel belum muncul di GraphQL
-Jalankan `bash KatalogService/hasura/apply-metadata.sh` atau Track All di Console.
+Container `hasura_setup` menerapkan metadata secara otomatis. Jika gagal:
+```bash
+# Cek log container setup
+docker compose logs hasura_setup
+# Atau apply manual
+bash KatalogService/hasura/apply-metadata.sh
+```
 
 ### Port sudah terpakai
 Ubah port di `.env` root:

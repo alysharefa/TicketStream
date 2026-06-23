@@ -2,7 +2,7 @@
 # Sistem Pemesanan Tiket Konser — docker-compose.yml (All-in-One)
 #
 # Menjalankan SEMUA microservice + infrastruktur pendukung dalam satu
-# perintah:  docker compose up --build
+# perintah:  docker compose up --build -d
 #
 # Container:
 #   S1: postgres_event + hasura          (Katalog Event, GraphQL auto)
@@ -25,7 +25,7 @@ services:
   # ==================================================================
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: rabbitmq
+    container_name: ts-rabbitmq
     restart: unless-stopped
     ports:
       - "${RABBITMQ_PORT:-5672}:5672"
@@ -46,7 +46,7 @@ services:
   # ==================================================================
   postgres_event:
     image: postgres:16
-    container_name: s1_postgres_event
+    container_name: ts-katalog-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-hasura}
@@ -65,7 +65,7 @@ services:
 
   hasura:
     image: hasura/graphql-engine:latest
-    container_name: s1_hasura
+    container_name: ts-katalog-api
     restart: unless-stopped
     depends_on:
       postgres_event:
@@ -78,15 +78,50 @@ services:
       HASURA_GRAPHQL_DEV_MODE: "true"
       HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-myadminsecret}
       HASURA_GRAPHQL_ENABLED_LOG_TYPES: "startup, http-log, webhook-log, websocket-log, query-log"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
     networks:
       - ticketing_net
+
+  # Container init — auto-apply metadata Hasura (track tabel + relasi).
+  # Berjalan SEKALI lalu exit. Idempotent, aman dijalankan berulang.
+  hasura_setup:
+    image: curlimages/curl:latest
+    container_name: ts-hasura-setup
+    depends_on:
+      hasura:
+        condition: service_healthy
+    volumes:
+      - ./KatalogService/hasura:/hasura:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo '==> Applying Hasura metadata (track tables + relationships)...'
+        HTTP_CODE=$$(curl -s -o /dev/null -w '%%{http_code}' -X POST http://hasura:8080/v1/metadata \
+          -H 'Content-Type: application/json' \
+          -H "x-hasura-admin-secret: $${HASURA_ADMIN_SECRET}" \
+          --data-binary @/hasura/metadata.json)
+        if [ "$$HTTP_CODE" = "200" ]; then
+          echo '==> Metadata applied successfully!'
+        else
+          echo "==> ERROR: Metadata apply returned HTTP $$HTTP_CODE" >&2
+          exit 1
+        fi
+    environment:
+      HASURA_ADMIN_SECRET: ${HASURA_ADMIN_SECRET:-myadminsecret}
+    networks:
+      - ticketing_net
+    restart: "no"
 
   # ==================================================================
   # Service 2 — Booking & Queue (Laravel REST + MySQL + Publisher)
   # ==================================================================
   mysql_booking:
     image: mysql:8
-    container_name: s2_mysql_booking
+    container_name: ts-booking-db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${MYSQL_BOOKING_DB:-db_ticket_booking}
@@ -105,7 +140,7 @@ services:
     build:
       context: ./BookingService
       dockerfile: Dockerfile
-    container_name: s2_booking_service
+    container_name: ts-booking-api
     restart: unless-stopped
     depends_on:
       mysql_booking:
@@ -141,7 +176,7 @@ services:
   # ==================================================================
   mysql_issuing:
     image: mysql:8
-    container_name: s3_mysql_issuing
+    container_name: ts-payment-db
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${MYSQL_ISSUING_DB:-db_ticket_issuing}
@@ -160,13 +195,15 @@ services:
     build:
       context: ./PaymentService
       dockerfile: Dockerfile
-    container_name: s3_issuing_service
+    container_name: ts-payment-api
     restart: unless-stopped
     depends_on:
       mysql_issuing:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      hasura_setup:
+        condition: service_completed_successfully
     ports:
       - "${ISSUING_PORT:-8002}:8000"
     environment:
@@ -198,13 +235,15 @@ services:
     build:
       context: ./PaymentService
       dockerfile: Dockerfile
-    container_name: s3_issuing_worker
+    container_name: ts-payment-worker
     restart: unless-stopped
     depends_on:
       mysql_issuing:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      hasura_setup:
+        condition: service_completed_successfully
     command: php artisan queue:work rabbitmq --queue=ticket_orders --tries=3 --sleep=1
     environment:
       APP_NAME: PaymentService
