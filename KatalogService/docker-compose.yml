@@ -10,7 +10,7 @@
 services:
   postgres_event:
     image: postgres:16
-    container_name: s1_postgres_event
+    container_name: ts-katalog-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-hasura}
@@ -32,7 +32,7 @@ services:
     # Catatan: 'latest' = versi v2 stabil terbaru. Untuk produksi, pin ke versi spesifik
     # (mis. hasura/graphql-engine:v2.42.0). Lihat https://hub.docker.com/r/hasura/graphql-engine/tags
     image: hasura/graphql-engine:latest
-    container_name: s1_hasura
+    container_name: ts-katalog-api
     restart: unless-stopped
     depends_on:
       postgres_event:

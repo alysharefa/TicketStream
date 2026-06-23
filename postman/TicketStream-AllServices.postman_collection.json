@@ -2,12 +2,30 @@
 	"info": {
 		"_postman_id": "ts-all-services-2026",
 		"name": "TicketStream — All Services (End-to-End)",
-		"description": "Koleksi Postman gabungan untuk semua 3 microservice TicketStream.\n\nAlur End-to-End:\n1. Browse konser via Hasura GraphQL (S1)\n2. Buat booking via REST / GraphQL (S2)\n3. Cek status booking via GraphQL (S2)\n4. Cek tiket via GraphQL (S3)\n\nPort:\n- S1 Hasura: 8080\n- S2 Booking: 8001\n- S3 Payment: 8002\n- RabbitMQ: 15672",
+		"description": "Koleksi Postman gabungan untuk semua 3 microservice TicketStream.\n\nAlur End-to-End:\n1. Browse konser via Hasura GraphQL (S1, port 8080)\n2. Buat booking via REST (S2, port 8001) → pesanan masuk antrean RabbitMQ\n3. Worker S3 memproses antrean → potong kuota (S1) → terbitkan tiket\n4. Cek status booking (S2) dan tiket (S3, port 8002)\n\n📌 Tips:\n- Jalankan 'Buat Booking' terlebih dahulu, order_code akan otomatis tersimpan.\n- Request selanjutnya yang membutuhkan order_code sudah otomatis terisi.\n- Untuk skenario Sold Out, jalankan step secara berurutan dari Step 0.\n\nPort:\n- S1 Hasura: 8080\n- S2 Booking: 8001\n- S3 Payment: 8002\n- RabbitMQ: 15672",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
+	"variable": [
+		{
+			"key": "hasura_secret",
+			"value": "myadminsecret",
+			"type": "string"
+		},
+		{
+			"key": "order_code",
+			"value": "ORD-XXXXXXXX-XXXX",
+			"type": "string"
+		},
+		{
+			"key": "ticket_code",
+			"value": "TKT-2026-XXXXX",
+			"type": "string"
+		}
+	],
 	"item": [
 		{
 			"name": "S1 — Katalog Event (Hasura GraphQL)",
+			"description": "Service 1: Data master konser & artis.\n\nMenggunakan Hasura GraphQL Engine yang auto-generate API dari skema PostgreSQL.\nSemua request memerlukan header x-hasura-admin-secret.\n\nPort: 8080 | Database: PostgreSQL",
 			"item": [
 				{
 					"name": "1. Konser Tersedia (kuota > 0)",
@@ -15,11 +33,14 @@
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type",            "value": "application/json" },
-							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+							{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"{ concerts(where: {available_quota: {_gt: 0}}, order_by: {event_date: asc}) { id name venue event_date price available_quota artist { name genre } } }\"\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query KonserTersedia {\n  concerts(\n    where: { available_quota: { _gt: 0 } }\n    order_by: { event_date: asc }\n  ) {\n    id\n    name\n    venue\n    event_date\n    price\n    available_quota\n    artist {\n      name\n      genre\n    }\n  }\n}",
+								"variables": "{}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8080/v1/graphql",
@@ -27,7 +48,8 @@
 							"host": ["localhost"],
 							"port": "8080",
 							"path": ["v1", "graphql"]
-						}
+						},
+						"description": "Menampilkan semua konser yang masih memiliki kuota tiket (available_quota > 0), diurutkan berdasarkan tanggal.\n\nGunakan ini untuk memilih konser sebelum membuat booking di S2."
 					}
 				},
 				{
@@ -36,11 +58,14 @@
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type",            "value": "application/json" },
-							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+							{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"query CariKonser($genre: String, $keyword: String) { concerts(where: {_and: [{artist: {genre: {_eq: $genre}}}, {name: {_ilike: $keyword}}]}) { id name venue event_date price available_quota artist { name } } }\",\n  \"variables\": { \"genre\": \"Pop\", \"keyword\": \"%konser%\" }\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query CariKonser($genre: String, $keyword: String) {\n  concerts(\n    where: {\n      _and: [\n        { artist: { genre: { _eq: $genre } } }\n        { name: { _ilike: $keyword } }\n      ]\n    }\n  ) {\n    id\n    name\n    venue\n    event_date\n    price\n    available_quota\n    artist {\n      name\n    }\n  }\n}",
+								"variables": "{\n  \"genre\": \"Pop\",\n  \"keyword\": \"%konser%\"\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8080/v1/graphql",
@@ -48,7 +73,8 @@
 							"host": ["localhost"],
 							"port": "8080",
 							"path": ["v1", "graphql"]
-						}
+						},
+						"description": "Mencari konser berdasarkan genre artis dan keyword nama konser.\n\nGanti variabel 'genre' dan 'keyword' sesuai kebutuhan.\nGunakan % sebagai wildcard (contoh: %tour% untuk mencari yang mengandung kata 'tour')."
 					}
 				},
 				{
@@ -57,11 +83,14 @@
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type",            "value": "application/json" },
-							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+							{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"{ concerts_by_pk(id: 1) { id name venue event_date price total_quota available_quota artist { id name genre } } }\"\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query DetailKonser($id: Int!) {\n  concerts_by_pk(id: $id) {\n    id\n    name\n    venue\n    event_date\n    price\n    total_quota\n    available_quota\n    artist {\n      id\n      name\n      genre\n    }\n  }\n}",
+								"variables": "{\n  \"id\": 1\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8080/v1/graphql",
@@ -69,7 +98,8 @@
 							"host": ["localhost"],
 							"port": "8080",
 							"path": ["v1", "graphql"]
-						}
+						},
+						"description": "Menampilkan detail lengkap satu konser berdasarkan ID.\n\nGanti id di tab Variables sesuai konser yang ingin dilihat."
 					}
 				},
 				{
@@ -78,11 +108,14 @@
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type",            "value": "application/json" },
-							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+							{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"{ concerts_aggregate { aggregate { count sum { available_quota } } } }\"\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query StatistikKatalog {\n  concerts_aggregate {\n    aggregate {\n      count\n      sum {\n        available_quota\n      }\n    }\n  }\n}",
+								"variables": "{}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8080/v1/graphql",
@@ -90,7 +123,8 @@
 							"host": ["localhost"],
 							"port": "8080",
 							"path": ["v1", "graphql"]
-						}
+						},
+						"description": "Menampilkan statistik katalog: jumlah total konser dan total sisa kuota.\n\nMenggunakan fitur aggregate bawaan Hasura."
 					}
 				},
 				{
@@ -99,11 +133,14 @@
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type",            "value": "application/json" },
-							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+							{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"mutation KurangiKuota($id: Int!) { update_concerts(where: {id: {_eq: $id}, available_quota: {_gt: 0}}, _inc: {available_quota: -1}) { affected_rows returning { id name available_quota } } }\",\n  \"variables\": { \"id\": 1 }\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "mutation KurangiKuota($id: Int!) {\n  update_concerts(\n    where: {\n      id: { _eq: $id }\n      available_quota: { _gt: 0 }\n    }\n    _inc: { available_quota: -1 }\n  ) {\n    affected_rows\n    returning {\n      id\n      name\n      available_quota\n    }\n  }\n}",
+								"variables": "{\n  \"id\": 1\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8080/v1/graphql",
@@ -111,7 +148,8 @@
 							"host": ["localhost"],
 							"port": "8080",
 							"path": ["v1", "graphql"]
-						}
+						},
+						"description": "⚠️ Mutation ini biasanya dipanggil otomatis oleh Worker Service 3, bukan manual.\n\nMengurangi kuota tiket sebanyak 1 secara atomik. Syarat available_quota > 0 pada WHERE menjamin tidak pernah overselling.\n\nJika affected_rows = 0, artinya kuota sudah habis."
 					}
 				},
 				{
@@ -120,11 +158,14 @@
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type",            "value": "application/json" },
-							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+							{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"mutation SetKuota($id: Int!, $quota: Int!) { update_concerts_by_pk(pk_columns: {id: $id}, _set: {available_quota: $quota}) { id name available_quota total_quota } }\",\n  \"variables\": { \"id\": 5, \"quota\": 2 }\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "mutation SetKuota($id: Int!, $quota: Int!) {\n  update_concerts_by_pk(\n    pk_columns: { id: $id }\n    _set: { available_quota: $quota }\n  ) {\n    id\n    name\n    available_quota\n    total_quota\n  }\n}",
+								"variables": "{\n  \"id\": 5,\n  \"quota\": 2\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8080/v1/graphql",
@@ -132,7 +173,8 @@
 							"host": ["localhost"],
 							"port": "8080",
 							"path": ["v1", "graphql"]
-						}
+						},
+						"description": "Mereset kuota konser ke nilai tertentu. Berguna untuk persiapan skenario testing.\n\nContoh: set kuota konser #5 ke 2 sebelum menjalankan skenario Sold Out."
 					}
 				},
 				{
@@ -141,11 +183,14 @@
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type",            "value": "application/json" },
-							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+							{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"mutation TambahKonser($name: String!, $artist_id: Int!, $venue: String!, $event_date: timestamptz!, $price: numeric!, $total_quota: Int!, $available_quota: Int!) { insert_concerts_one(object: {name: $name, artist_id: $artist_id, venue: $venue, event_date: $event_date, price: $price, total_quota: $total_quota, available_quota: $available_quota}) { id name artist { name } } }\",\n  \"variables\": { \"name\": \"Konser Spesial Tahun Baru\", \"artist_id\": 1, \"venue\": \"Monas, Jakarta\", \"event_date\": \"2026-12-31T20:00:00+07:00\", \"price\": 500000, \"total_quota\": 1000, \"available_quota\": 1000 }\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "mutation TambahKonser(\n  $name: String!\n  $artist_id: Int!\n  $venue: String!\n  $event_date: timestamptz!\n  $price: numeric!\n  $total_quota: Int!\n  $available_quota: Int!\n) {\n  insert_concerts_one(\n    object: {\n      name: $name\n      artist_id: $artist_id\n      venue: $venue\n      event_date: $event_date\n      price: $price\n      total_quota: $total_quota\n      available_quota: $available_quota\n    }\n  ) {\n    id\n    name\n    artist {\n      name\n    }\n  }\n}",
+								"variables": "{\n  \"name\": \"Konser Spesial Tahun Baru\",\n  \"artist_id\": 1,\n  \"venue\": \"Monas, Jakarta\",\n  \"event_date\": \"2026-12-31T20:00:00+07:00\",\n  \"price\": 500000,\n  \"total_quota\": 1000,\n  \"available_quota\": 1000\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8080/v1/graphql",
@@ -153,7 +198,8 @@
 							"host": ["localhost"],
 							"port": "8080",
 							"path": ["v1", "graphql"]
-						}
+						},
+						"description": "Menambahkan konser baru ke katalog.\n\nPastikan artist_id sesuai dengan ID artis yang sudah ada di tabel artists."
 					}
 				},
 				{
@@ -162,11 +208,14 @@
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type",            "value": "application/json" },
-							{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+							{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"{ artists { id name genre concerts { id name event_date venue price available_quota } } }\"\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query ArtisDenganKonser {\n  artists {\n    id\n    name\n    genre\n    concerts {\n      id\n      name\n      event_date\n      venue\n      price\n      available_quota\n    }\n  }\n}",
+								"variables": "{}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8080/v1/graphql",
@@ -174,16 +223,19 @@
 							"host": ["localhost"],
 							"port": "8080",
 							"path": ["v1", "graphql"]
-						}
+						},
+						"description": "Menampilkan semua artis beserta daftar konser mereka.\n\nMemanfaatkan relasi array relationship yang di-setup di Hasura."
 					}
 				}
 			]
 		},
 		{
 			"name": "S2 — Booking & Queue (REST + GraphQL)",
+			"description": "Service 2: Menerima pesanan dan mengirim ke antrean RabbitMQ.\n\n• REST API untuk membuat dan mengelola booking.\n• GraphQL (Lighthouse) untuk query data booking.\n\nPort: 8001 | Database: MySQL",
 			"item": [
 				{
 					"name": "REST",
+					"description": "Endpoint REST untuk membuat dan mengelola pesanan tiket.\n\nBooking yang dibuat akan berstatus PENDING dan langsung diantrekan ke RabbitMQ.",
 					"item": [
 						{
 							"name": "1. Buat Booking",
@@ -195,6 +247,7 @@
 											"var jsonData = pm.response.json();",
 											"if (jsonData.order_code) {",
 											"    pm.collectionVariables.set('order_code', jsonData.order_code);",
+											"    console.log('✅ order_code tersimpan: ' + jsonData.order_code);",
 											"}",
 											"pm.test('Status 202 Accepted', function () {",
 											"    pm.response.to.have.status(202);",
@@ -220,7 +273,8 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["api", "bookings"]
-								}
+								},
+								"description": "Membuat pesanan tiket baru. Booking disimpan sebagai PENDING, lalu dikirim ke antrean RabbitMQ untuk diproses Service 3.\n\n✅ order_code otomatis tersimpan ke collection variable setelah request berhasil.\n\nExpected: 202 Accepted + order_code.\n\nBody:\n- concert_id (int): ID konser dari S1\n- user_id (string): ID user\n- quantity (int): Jumlah tiket (max 10)\n- amount (int, opsional): Total harga"
 							}
 						},
 						{
@@ -236,7 +290,8 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["api", "bookings", "{{order_code}}"]
-								}
+								},
+								"description": "Mengecek status booking berdasarkan order_code.\n\n{{order_code}} otomatis terisi dari response 'Buat Booking'.\n\nStatus yang mungkin:\n- PENDING: Belum diproses worker\n- PROCESSED: Sudah diproses oleh Service 3\n- FAILED: Pemrosesan gagal"
 							}
 						},
 						{
@@ -257,24 +312,29 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["api", "bookings", "{{order_code}}", "status"]
-								}
+								},
+								"description": "⚠️ Endpoint ini biasanya dipanggil oleh Service 3 secara otomatis setelah worker memproses pesanan. TIDAK perlu dipanggil manual.\n\nStatus valid: PENDING, PROCESSED, FAILED."
 							}
 						}
 					]
 				},
 				{
 					"name": "GraphQL",
+					"description": "Query GraphQL (Lighthouse) untuk mengecek data booking.\n\nEndpoint: POST http://localhost:8001/graphql",
 					"item": [
 						{
-							"name": "4. [GraphQL] Cek Booking by Order Code",
+							"name": "4. Booking by Order Code",
 							"request": {
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type", "value": "application/json" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"{{order_code}}\\\") { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query BookingByOrder($order_code: String!) {\n  bookingByOrder(order_code: $order_code) {\n    id\n    order_code\n    concert_id\n    user_id\n    quantity\n    amount\n    status\n    created_at\n    updated_at\n  }\n}",
+										"variables": "{\n  \"order_code\": \"{{order_code}}\"\n}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8001/graphql",
@@ -282,19 +342,23 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["graphql"]
-								}
+								},
+								"description": "Mencari satu booking berdasarkan order_code via GraphQL.\n\n{{order_code}} otomatis terisi dari response 'Buat Booking'.\n\nAlternatif dari REST GET /api/bookings/{order_code} dengan lebih banyak field."
 							}
 						},
 						{
-							"name": "5. [GraphQL] Semua Booking User",
+							"name": "5. Semua Booking User",
 							"request": {
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type", "value": "application/json" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ myBookings(user_id: \\\"andi\\\") { id order_code concert_id quantity amount status created_at } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query SemuaBookingUser($user_id: String!) {\n  myBookings(user_id: $user_id) {\n    id\n    order_code\n    concert_id\n    quantity\n    amount\n    status\n    created_at\n  }\n}",
+										"variables": "{\n  \"user_id\": \"andi\"\n}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8001/graphql",
@@ -302,19 +366,23 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["graphql"]
-								}
+								},
+								"description": "Melihat semua booking milik user tertentu.\n\nGanti user_id di tab Variables dengan user yang ingin dicari."
 							}
 						},
 						{
-							"name": "6. [GraphQL] Booking per Konser",
+							"name": "6. Booking per Konser",
 							"request": {
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type", "value": "application/json" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ bookingsByConcert(concert_id: 1) { id order_code user_id quantity amount status created_at } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query BookingPerKonser($concert_id: Int!) {\n  bookingsByConcert(concert_id: $concert_id) {\n    id\n    order_code\n    user_id\n    quantity\n    amount\n    status\n    created_at\n  }\n}",
+										"variables": "{\n  \"concert_id\": 1\n}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8001/graphql",
@@ -322,19 +390,23 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["graphql"]
-								}
+								},
+								"description": "Melihat semua booking pada satu konser tertentu.\n\nGanti concert_id di tab Variables sesuai ID konser dari S1."
 							}
 						},
 						{
-							"name": "7. [GraphQL] Semua Booking",
+							"name": "7. Semua Booking",
 							"request": {
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type", "value": "application/json" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ allBookings { id order_code concert_id user_id quantity amount status created_at } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query SemuaBooking {\n  allBookings {\n    id\n    order_code\n    concert_id\n    user_id\n    quantity\n    amount\n    status\n    created_at\n  }\n}",
+										"variables": "{}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8001/graphql",
@@ -342,7 +414,8 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["graphql"]
-								}
+								},
+								"description": "Menampilkan seluruh data booking (untuk keperluan admin/debug)."
 							}
 						}
 					]
@@ -351,17 +424,36 @@
 		},
 		{
 			"name": "S3 — Payment & Ticket Issuing (GraphQL)",
+			"description": "Service 3: Memproses antrean pesanan, membayar, dan menerbitkan tiket.\n\nWorker mengonsumsi pesan dari RabbitMQ secara berurutan (1 per 1), lalu:\n1. Potong kuota via mutation Hasura (S1)\n2. Buat record pembayaran\n3. Terbitkan tiket (TKT-2026-XXXXX)\n\nPort: 8002 | Database: MySQL",
 			"item": [
 				{
 					"name": "1. Cek Tiket by Order Code",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var json = pm.response.json();",
+									"if (json && json.data && json.data.ticketByOrder && json.data.ticketByOrder.ticket_code) {",
+									"    pm.collectionVariables.set('ticket_code', json.data.ticketByOrder.ticket_code);",
+									"    console.log('✅ ticket_code tersimpan: ' + json.data.ticketByOrder.ticket_code);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
 					"request": {
 						"method": "POST",
 						"header": [
 							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"{ ticketByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { id order_code concert_id user_id ticket_code status issued_at created_at } }\"\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query TiketByOrder($order_code: String!) {\n  ticketByOrder(order_code: $order_code) {\n    id\n    order_code\n    concert_id\n    user_id\n    ticket_code\n    status\n    issued_at\n    created_at\n  }\n}",
+								"variables": "{\n  \"order_code\": \"{{order_code}}\"\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8002/graphql",
@@ -369,7 +461,8 @@
 							"host": ["localhost"],
 							"port": "8002",
 							"path": ["graphql"]
-						}
+						},
+						"description": "Mencari tiket berdasarkan order_code pesanan.\n\n{{order_code}} otomatis terisi dari response 'Buat Booking' di S2.\n✅ ticket_code otomatis tersimpan jika tiket sudah terbit.\n\n⏳ Jika response null, tunggu beberapa detik lalu coba lagi — worker mungkin belum selesai memproses.\n\nStatus tiket:\n- SUCCESS: Tiket terbit, ticket_code terisi\n- SOLD_OUT: Kuota habis saat diproses\n- FAILED: Pemrosesan gagal"
 					}
 				},
 				{
@@ -380,8 +473,11 @@
 							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"{ ticket(ticket_code: \\\"TKT-2026-XXXXX\\\") { id order_code concert_id user_id ticket_code status issued_at created_at } }\"\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query TiketByCode($ticket_code: String!) {\n  ticket(ticket_code: $ticket_code) {\n    id\n    order_code\n    concert_id\n    user_id\n    ticket_code\n    status\n    issued_at\n    created_at\n  }\n}",
+								"variables": "{\n  \"ticket_code\": \"{{ticket_code}}\"\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8002/graphql",
@@ -389,7 +485,8 @@
 							"host": ["localhost"],
 							"port": "8002",
 							"path": ["graphql"]
-						}
+						},
+						"description": "Mencari tiket berdasarkan kode tiket (format TKT-2026-XXXXX).\n\n{{ticket_code}} otomatis terisi dari response 'Cek Tiket by Order Code' jika tiket berstatus SUCCESS."
 					}
 				},
 				{
@@ -400,8 +497,11 @@
 							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"{ myTickets(user_id: \\\"andi\\\") { id order_code concert_id user_id ticket_code status issued_at created_at } }\"\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query SemuaTiketUser($user_id: String!) {\n  myTickets(user_id: $user_id) {\n    id\n    order_code\n    concert_id\n    user_id\n    ticket_code\n    status\n    issued_at\n    created_at\n  }\n}",
+								"variables": "{\n  \"user_id\": \"andi\"\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8002/graphql",
@@ -409,7 +509,8 @@
 							"host": ["localhost"],
 							"port": "8002",
 							"path": ["graphql"]
-						}
+						},
+						"description": "Melihat semua tiket milik user tertentu.\n\nGanti user_id di tab Variables dengan user yang ingin dicari."
 					}
 				},
 				{
@@ -420,8 +521,11 @@
 							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"query\": \"{ paymentByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { id order_code amount status paid_at created_at } }\"\n}"
+							"mode": "graphql",
+							"graphql": {
+								"query": "query PembayaranByOrder($order_code: String!) {\n  paymentByOrder(order_code: $order_code) {\n    id\n    order_code\n    amount\n    status\n    paid_at\n    created_at\n  }\n}",
+								"variables": "{\n  \"order_code\": \"{{order_code}}\"\n}"
+							}
 						},
 						"url": {
 							"raw": "http://localhost:8002/graphql",
@@ -429,7 +533,8 @@
 							"host": ["localhost"],
 							"port": "8002",
 							"path": ["graphql"]
-						}
+						},
+						"description": "Mengecek catatan pembayaran berdasarkan order_code.\n\n{{order_code}} otomatis terisi dari response 'Buat Booking' di S2.\n\nPayment record dibuat otomatis oleh worker saat memproses pesanan."
 					}
 				},
 				{
@@ -441,16 +546,19 @@
 							"protocol": "http",
 							"host": ["localhost"],
 							"port": "8002"
-						}
+						},
+						"description": "Cek apakah Service 3 berjalan.\n\nExpected response: JSON { service: '...', status: 'running' }"
 					}
 				}
 			]
 		},
 		{
 			"name": "End-to-End Scenarios",
+			"description": "Skenario pengujian end-to-end yang menggabungkan ketiga service.\n\n📌 Jalankan setiap step secara berurutan dari atas ke bawah.\n📌 Variable {{order_code}} otomatis terisi setelah step Buat Booking.",
 			"item": [
 				{
 					"name": "Scenario: Happy Path",
+					"description": "Skenario sukses: Buat booking → tiket terbit → kuota berkurang.\n\nJalankan step 1-5 berurutan.\n⏳ Setelah Step 2, tunggu 3-5 detik sebelum Step 3 & 4 agar worker sempat memproses.",
 					"item": [
 						{
 							"name": "Step 1 — Browse Konser (S1)",
@@ -458,11 +566,14 @@
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type",            "value": "application/json" },
-									{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+									{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ concerts(where: {available_quota: {_gt: 0}}, order_by: {event_date: asc}) { id name price available_quota artist { name } } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query BrowseKonser {\n  concerts(\n    where: { available_quota: { _gt: 0 } }\n    order_by: { event_date: asc }\n  ) {\n    id\n    name\n    price\n    available_quota\n    artist {\n      name\n    }\n  }\n}",
+										"variables": "{}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8080/v1/graphql",
@@ -470,11 +581,30 @@
 									"host": ["localhost"],
 									"port": "8080",
 									"path": ["v1", "graphql"]
-								}
+								},
+								"description": "Lihat daftar konser yang masih tersedia.\n\nPilih salah satu concert id untuk digunakan di Step 2."
 							}
 						},
 						{
 							"name": "Step 2 — Buat Booking (S2 REST)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"var jsonData = pm.response.json();",
+											"if (jsonData.order_code) {",
+											"    pm.collectionVariables.set('order_code', jsonData.order_code);",
+											"    console.log('✅ order_code tersimpan: ' + jsonData.order_code);",
+											"}",
+											"pm.test('Status 202 Accepted', function () {",
+											"    pm.response.to.have.status(202);",
+											"});"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
@@ -491,7 +621,8 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["api", "bookings"]
-								}
+								},
+								"description": "Buat booking tiket konser.\n\n✅ order_code otomatis tersimpan ke {{order_code}} — step selanjutnya akan menggunakannya.\n\nExpected: 202 Accepted.\n\n⏳ Setelah step ini, tunggu 3-5 detik sebelum lanjut ke Step 3."
 							}
 						},
 						{
@@ -502,8 +633,11 @@
 									{ "key": "Content-Type", "value": "application/json" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { order_code status quantity amount } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query CekBooking($order_code: String!) {\n  bookingByOrder(order_code: $order_code) {\n    order_code\n    status\n    quantity\n    amount\n  }\n}",
+										"variables": "{\n  \"order_code\": \"{{order_code}}\"\n}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8001/graphql",
@@ -511,19 +645,38 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["graphql"]
-								}
+								},
+								"description": "Cek status booking di Service 2.\n\n{{order_code}} otomatis terisi dari Step 2.\n\nJika status masih PENDING, worker belum selesai memproses."
 							}
 						},
 						{
 							"name": "Step 4 — Cek Tiket (S3 GraphQL)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"var json = pm.response.json();",
+											"if (json && json.data && json.data.ticketByOrder && json.data.ticketByOrder.ticket_code) {",
+											"    pm.collectionVariables.set('ticket_code', json.data.ticketByOrder.ticket_code);",
+											"    console.log('✅ ticket_code tersimpan: ' + json.data.ticketByOrder.ticket_code);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
 							"request": {
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type", "value": "application/json" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ ticketByOrder(order_code: \\\"ORD-20260615-XXXX\\\") { order_code ticket_code status issued_at } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query CekTiket($order_code: String!) {\n  ticketByOrder(order_code: $order_code) {\n    order_code\n    ticket_code\n    status\n    issued_at\n  }\n}",
+										"variables": "{\n  \"order_code\": \"{{order_code}}\"\n}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8002/graphql",
@@ -531,7 +684,8 @@
 									"host": ["localhost"],
 									"port": "8002",
 									"path": ["graphql"]
-								}
+								},
+								"description": "Cek apakah tiket sudah terbit di Service 3.\n\n{{order_code}} otomatis terisi dari Step 2.\n✅ ticket_code otomatis tersimpan jika tiket sudah terbit.\n\n⏳ Jika response null, tunggu beberapa detik lalu coba lagi.\n\nExpected: status = SUCCESS, ticket_code = TKT-2026-XXXXX."
 							}
 						},
 						{
@@ -540,11 +694,14 @@
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type",            "value": "application/json" },
-									{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+									{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ concerts_by_pk(id: 1) { id name available_quota total_quota } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query VerifikasiKuota {\n  concerts_by_pk(id: 1) {\n    id\n    name\n    available_quota\n    total_quota\n  }\n}",
+										"variables": "{}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8080/v1/graphql",
@@ -552,13 +709,15 @@
 									"host": ["localhost"],
 									"port": "8080",
 									"path": ["v1", "graphql"]
-								}
+								},
+								"description": "Verifikasi bahwa available_quota berkurang setelah tiket terbit.\n\nBandingkan dengan kuota di Step 1 — seharusnya berkurang sesuai quantity booking."
 							}
 						}
 					]
 				},
 				{
 					"name": "Scenario: Sold Out (Anti-Overselling)",
+					"description": "Skenario anti-overselling: Set kuota = 2, lalu kirim 3 booking.\n\nHasil yang diharapkan:\n- 2 tiket SUCCESS\n- 1 tiket SOLD_OUT\n- Kuota akhir = 0 (tidak pernah minus)\n\n⏳ Setelah semua booking terkirim, tunggu 5-10 detik sebelum cek tiket agar worker sempat memproses semua antrean.",
 					"item": [
 						{
 							"name": "Step 0 — Reset Kuota Konser #5 ke 2",
@@ -566,11 +725,14 @@
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type",            "value": "application/json" },
-									{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+									{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"mutation { update_concerts_by_pk(pk_columns: {id: 5}, _set: {available_quota: 2}) { id name available_quota } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "mutation ResetKuota {\n  update_concerts_by_pk(\n    pk_columns: { id: 5 }\n    _set: { available_quota: 2 }\n  ) {\n    id\n    name\n    available_quota\n  }\n}",
+										"variables": "{}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8080/v1/graphql",
@@ -578,7 +740,8 @@
 									"host": ["localhost"],
 									"port": "8080",
 									"path": ["v1", "graphql"]
-								}
+								},
+								"description": "⚠️ WAJIB dijalankan pertama sebelum step lainnya.\n\nMereset kuota konser #5 menjadi 2. Ini memastikan hanya 2 tiket yang bisa terbit."
 							}
 						},
 						{
@@ -599,7 +762,8 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["api", "bookings"]
-								}
+								},
+								"description": "Booking pertama untuk konser #5 (user-a). Expected: 202 Accepted.\n\nTiket ini seharusnya SUCCESS karena kuota masih 2."
 							}
 						},
 						{
@@ -620,7 +784,8 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["api", "bookings"]
-								}
+								},
+								"description": "Booking kedua untuk konser #5 (user-b). Expected: 202 Accepted.\n\nTiket ini seharusnya SUCCESS karena kuota masih 1."
 							}
 						},
 						{
@@ -641,7 +806,8 @@
 									"host": ["localhost"],
 									"port": "8001",
 									"path": ["api", "bookings"]
-								}
+								},
+								"description": "Booking ketiga untuk konser #5 (user-c). Expected: 202 Accepted.\n\n⚠️ Meskipun S2 tetap menerima pesanan (202), saat worker memproses pesanan ini kuota sudah habis → tiket akan berstatus SOLD_OUT."
 							}
 						},
 						{
@@ -652,8 +818,11 @@
 									{ "key": "Content-Type", "value": "application/json" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ myTickets(user_id: \\\"user-a\\\") { order_code ticket_code status } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query CekTiketUserA {\n  myTickets(user_id: \"user-a\") {\n    order_code\n    ticket_code\n    status\n  }\n}",
+										"variables": "{}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8002/graphql",
@@ -661,7 +830,8 @@
 									"host": ["localhost"],
 									"port": "8002",
 									"path": ["graphql"]
-								}
+								},
+								"description": "Cek tiket user-a di Service 3.\n\n⏳ Tunggu 5-10 detik setelah Step 3 sebelum menjalankan ini.\n\nExpected: status = SUCCESS (user-a mendapat booking pertama)."
 							}
 						},
 						{
@@ -670,11 +840,14 @@
 								"method": "POST",
 								"header": [
 									{ "key": "Content-Type",            "value": "application/json" },
-									{ "key": "x-hasura-admin-secret",   "value": "myadminsecret"    }
+									{ "key": "x-hasura-admin-secret",   "value": "{{hasura_secret}}" }
 								],
 								"body": {
-									"mode": "raw",
-									"raw": "{\n  \"query\": \"{ concerts_by_pk(id: 5) { id name available_quota total_quota } }\"\n}"
+									"mode": "graphql",
+									"graphql": {
+										"query": "query VerifikasiKuotaHabis {\n  concerts_by_pk(id: 5) {\n    id\n    name\n    available_quota\n    total_quota\n  }\n}",
+										"variables": "{}"
+									}
 								},
 								"url": {
 									"raw": "http://localhost:8080/v1/graphql",
@@ -682,7 +855,8 @@
 									"host": ["localhost"],
 									"port": "8080",
 									"path": ["v1", "graphql"]
-								}
+								},
+								"description": "Verifikasi kuota konser #5 = 0 (tidak pernah minus).\n\nIni membuktikan anti-overselling bekerja: 3 pesanan masuk, tapi hanya 2 tiket terbit."
 							}
 						}
 					]

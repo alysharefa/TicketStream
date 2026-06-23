@@ -2,7 +2,7 @@
   "info": {
     "name": "Service 1 - Event Catalog (Hasura GraphQL)",
     "_postman_id": "a1b2c3d4-0001-4a1a-9e1e-svc1eventcat01",
-    "description": "Koleksi untuk menguji API GraphQL Service 1 (Katalog Event).\n\nSetup: jalankan `docker compose up -d` lalu `bash hasura/apply-metadata.sh`.\nVariabel koleksi:\n- base_url     : http://localhost:8080\n- admin_secret : myadminsecret\n\nSemua request memakai body mode GraphQL ke endpoint /v1/graphql.",
+    "description": "GraphQL API Service 1 (Katalog Event) — powered by Hasura.\n\nService ini menyimpan data master konser dan artis di PostgreSQL, lalu Hasura auto-generate GraphQL API-nya.\n\nSemua request memerlukan header x-hasura-admin-secret.\n\nPort: 8080 | Database: PostgreSQL (db_event_catalog)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -20,6 +20,7 @@
       "name": "Query - Konser Tersedia",
       "request": {
         "method": "POST",
+        "description": "Menampilkan semua konser yang masih memiliki kuota tiket (available_quota > 0), diurutkan berdasarkan tanggal event.",
         "header": [
           {
             "key": "Content-Type",
@@ -53,6 +54,7 @@
       "name": "Query - Cari Konser (filter genre + keyword)",
       "request": {
         "method": "POST",
+        "description": "Mencari konser berdasarkan genre artis dan keyword nama konser. Gunakan operator _ilike untuk pencarian case-insensitive dengan wildcard %.",
         "header": [
           {
             "key": "Content-Type",
@@ -86,6 +88,7 @@
       "name": "Query - Detail Konser by ID",
       "request": {
         "method": "POST",
+        "description": "Menampilkan detail lengkap satu konser berdasarkan primary key (id), termasuk informasi artis.",
         "header": [
           {
             "key": "Content-Type",
@@ -119,6 +122,7 @@
       "name": "Query - Artis dengan Konser",
       "request": {
         "method": "POST",
+        "description": "Menampilkan semua artis beserta daftar konser mereka. Memanfaatkan relasi array relationship Hasura.",
         "header": [
           {
             "key": "Content-Type",
@@ -152,6 +156,7 @@
       "name": "Query - Statistik Katalog (aggregate)",
       "request": {
         "method": "POST",
+        "description": "Menampilkan statistik katalog: jumlah total konser dan total kuota yang masih tersedia. Menggunakan fitur aggregate Hasura.",
         "header": [
           {
             "key": "Content-Type",
@@ -185,6 +190,7 @@
       "name": "Mutation - Kurangi Kuota (dipakai Service 3)",
       "request": {
         "method": "POST",
+        "description": "Mutation untuk mengurangi kuota tiket secara atomik. Syarat available_quota > 0 pada WHERE clause menjamin tidak akan pernah terjadi overselling.\n\n⚠️ Mutation ini biasanya dipanggil oleh Service 3 Worker secara otomatis, bukan manual.",
         "header": [
           {
             "key": "Content-Type",
@@ -218,6 +224,7 @@
       "name": "Mutation - Tambah Konser (admin)",
       "request": {
         "method": "POST",
+        "description": "Menambahkan konser baru ke katalog. Perlu menyertakan artist_id yang valid (sesuai tabel artists).",
         "header": [
           {
             "key": "Content-Type",
@@ -251,6 +258,7 @@
       "name": "Mutation - Set Kuota (reset untuk pengujian)",
       "request": {
         "method": "POST",
+        "description": "Mereset kuota konser ke nilai tertentu. Berguna untuk persiapan skenario testing, misalnya set kuota = 2 sebelum uji anti-overselling.",
         "header": [
           {
             "key": "Content-Type",

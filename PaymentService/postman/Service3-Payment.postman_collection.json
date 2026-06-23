@@ -2,7 +2,7 @@
   "info": {
     "name": "Service 3 - Payment & Ticket Issuing (Lighthouse GraphQL)",
     "_postman_id": "a1b2c3d4-0003-4000-8000-000000000003",
-    "description": "Koleksi untuk menguji API GraphQL Service 3 (Payment & Ticket Issuing).\n\nSetup: jalankan `docker compose up -d --build` dari root repo.\nVariabel koleksi:\n- base_url : http://localhost:8002\n\nSemua request memakai body mode GraphQL ke endpoint /graphql.\nData tiket tercipta otomatis saat worker mengonsumsi antrean dari Service 2.",
+    "description": "GraphQL API Service 3 (Payment & Ticket Issuing).\n\nService ini memproses antrean pesanan dari RabbitMQ, melakukan pembayaran, mengurangi kuota via Hasura (Service 1), dan menerbitkan tiket.\n\nData tiket dan payment tercipta otomatis saat worker mengonsumsi antrean dari Service 2.\n\nPort: 8002 | Database: MySQL (db_ticket_issuing)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -25,6 +25,19 @@
   ],
   "item": [
     {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/",
+          "host": ["{{base_url}}"],
+          "path": [""]
+        },
+        "description": "Cek apakah Service 3 berjalan. Expected: JSON { service, status }."
+      }
+    },
+    {
       "name": "Query - Tiket by Order Code",
       "request": {
         "method": "POST",
@@ -45,7 +58,8 @@
             "query": "query TicketByOrder($order_code: String!) {\n  ticketByOrder(order_code: $order_code) {\n    id\n    order_code\n    ticket_code\n    concert_id\n    user_id\n    status\n    issued_at\n    created_at\n  }\n}",
             "variables": "{\n  \"order_code\": \"{{order_code}}\"\n}"
           }
-        }
+        },
+        "description": "Mencari tiket berdasarkan order_code pesanan. Gunakan ini setelah membuat booking di Service 2 untuk mengecek apakah tiket sudah terbit.\n\nStatus: SUCCESS (tiket terbit), SOLD_OUT (kuota habis), FAILED (error), atau null (belum diproses worker)."
       },
       "event": [
         {
@@ -83,7 +97,8 @@
             "query": "query TicketByCode($ticket_code: String!) {\n  ticket(ticket_code: $ticket_code) {\n    id\n    order_code\n    ticket_code\n    concert_id\n    user_id\n    status\n    issued_at\n    created_at\n  }\n}",
             "variables": "{\n  \"ticket_code\": \"{{ticket_code}}\"\n}"
           }
-        }
+        },
+        "description": "Mencari tiket berdasarkan kode tiket (format TKT-2026-XXXXX). Kode tiket didapat dari response ticketByOrder setelah status SUCCESS."
       }
     },
     {
@@ -107,12 +122,12 @@
             "query": "query MyTickets($user_id: String!) {\n  myTickets(user_id: $user_id) {\n    id\n    order_code\n    ticket_code\n    concert_id\n    status\n    issued_at\n  }\n}",
             "variables": "{\n  \"user_id\": \"{{user_id}}\"\n}"
           }
-        }
+        },
+        "description": "Melihat semua tiket milik user tertentu. Berguna untuk mengecek riwayat pembelian tiket."
       }
     },
     {
-      "name": "Query - Tiket by Order (raw JSON)",
-      "description": "Alternatif via raw JSON body (tanpa GraphQL mode Postman), berguna untuk scripting/CI.",
+      "name": "Query - Pembayaran by Order Code",
       "request": {
         "method": "POST",
         "header": [
@@ -127,14 +142,17 @@
           "path": ["graphql"]
         },
         "body": {
-          "mode": "raw",
-          "raw": "{\n  \"query\": \"{ ticketByOrder(order_code: \\\"{{order_code}}\\\") { id order_code ticket_code status issued_at } }\"\n}"
-        }
+          "mode": "graphql",
+          "graphql": {
+            "query": "query PaymentByOrder($order_code: String!) {\n  paymentByOrder(order_code: $order_code) {\n    id\n    order_code\n    amount\n    status\n    paid_at\n    created_at\n  }\n}",
+            "variables": "{\n  \"order_code\": \"{{order_code}}\"\n}"
+          }
+        },
+        "description": "Mengecek catatan pembayaran berdasarkan order_code. Payment record dibuat otomatis oleh worker saat memproses pesanan."
       }
     },
     {
       "name": "Introspection - Skema GraphQL",
-      "description": "Introspeksi skema GraphQL untuk melihat semua type dan query yang tersedia.",
       "request": {
         "method": "POST",
         "header": [
@@ -154,7 +172,8 @@
             "query": "query Introspection {\n  __schema {\n    queryType { name }\n    types {\n      name\n      kind\n      fields {\n        name\n        type { name kind }\n      }\n    }\n  }\n}",
             "variables": "{}"
           }
-        }
+        },
+        "description": "Introspeksi skema GraphQL untuk melihat semua type dan query yang tersedia di Service 3."
       }
     }
   ]

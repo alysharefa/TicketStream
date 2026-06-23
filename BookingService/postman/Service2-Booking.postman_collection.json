@@ -2,7 +2,7 @@
   "info": {
     "name": "Service 2 - Booking & Queue",
     "_postman_id": "a1b2c3d4-0002-4000-8000-000000000002",
-    "description": "REST & GraphQL API Service 2 (Booking & Queue) untuk Sistem Pemesanan Tiket Konser. Menerima pesanan dan menerbitkannya ke antrean RabbitMQ.",
+    "description": "REST & GraphQL API Service 2 (Booking & Queue).\n\nService ini menerima pesanan tiket konser dan menerbitkannya ke antrean RabbitMQ untuk diproses oleh Service 3.\n\nAlur: Client → POST /api/bookings → PENDING → RabbitMQ → S3 Worker.\n\nPort: 8001 | Database: MySQL (db_ticket_booking)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -11,144 +11,169 @@
   ],
   "item": [
     {
-      "name": "POST /api/bookings (buat pesanan)",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json" }
-        ],
-        "url": {
-          "raw": "{{base_url}}/api/bookings",
-          "host": ["{{base_url}}"],
-          "path": ["api", "bookings"]
-        },
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"concert_id\": 5,\n  \"user_id\": \"andi\",\n  \"quantity\": 2,\n  \"amount\": 1700000\n}"
-        }
-      },
-      "event": [
+      "name": "REST",
+      "description": "Endpoint REST untuk membuat dan mengelola pesanan tiket.\n\nBooking yang dibuat akan berstatus PENDING dan langsung diantrekan ke RabbitMQ.",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "var json = pm.response.json();",
-              "if (json.order_code) { pm.collectionVariables.set('order_code', json.order_code); }"
-            ]
+          "name": "Buat Booking Baru",
+          "description": "Membuat pesanan tiket baru. Booking disimpan dengan status PENDING dan langsung dikirim ke antrean RabbitMQ untuk diproses oleh Service 3 (Payment Worker).\n\n✅ order_code otomatis tersimpan ke collection variable setelah request berhasil.\n\nExpected: 202 Accepted + order_code.\n\nBody:\n- concert_id (int): ID konser dari S1\n- user_id (string): ID user\n- quantity (int): Jumlah tiket (max 10)\n- amount (int, opsional): Total harga",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/bookings",
+              "host": ["{{base_url}}"],
+              "path": ["api", "bookings"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"concert_id\": 5,\n  \"user_id\": \"andi\",\n  \"quantity\": 2,\n  \"amount\": 1700000\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.order_code) {",
+                  "    pm.collectionVariables.set('order_code', json.order_code);",
+                  "    console.log('✅ order_code tersimpan: ' + json.order_code);",
+                  "}",
+                  "pm.test('Status 202 Accepted', function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cek Status Booking",
+          "description": "Mengecek status booking berdasarkan order_code. Gunakan order_code yang didapat dari response Buat Booking.\n\n{{order_code}} otomatis terisi jika sudah menjalankan 'Buat Booking Baru'.\n\nStatus:\n- PENDING: Belum diproses worker\n- PROCESSED: Sudah diproses oleh Service 3\n- FAILED: Pemrosesan gagal",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/bookings/{{order_code}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "bookings", "{{order_code}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Status Booking (Callback S3)",
+          "description": "⚠️ Endpoint ini biasanya dipanggil oleh Service 3 secara otomatis setelah worker memproses pesanan. TIDAK perlu dipanggil manual.\n\nStatus valid: PENDING, PROCESSED, FAILED.",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/bookings/{{order_code}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "bookings", "{{order_code}}", "status"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PROCESSED\"\n}"
+            }
           }
         }
       ]
     },
     {
-      "name": "GET /api/bookings/{order_code} (cek status)",
-      "request": {
-        "method": "GET",
-        "header": [
-          { "key": "Accept", "value": "application/json" }
-        ],
-        "url": {
-          "raw": "{{base_url}}/api/bookings/{{order_code}}",
-          "host": ["{{base_url}}"],
-          "path": ["api", "bookings", "{{order_code}}"]
-        }
-      }
-    },
-    {
-      "name": "PATCH /api/bookings/{order_code}/status (callback S3)",
-      "request": {
-        "method": "PATCH",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json" }
-        ],
-        "url": {
-          "raw": "{{base_url}}/api/bookings/{{order_code}}/status",
-          "host": ["{{base_url}}"],
-          "path": ["api", "bookings", "{{order_code}}", "status"]
+      "name": "GraphQL",
+      "description": "Query GraphQL (Lighthouse) untuk mengecek data booking.\n\nEndpoint: POST {{base_url}}/graphql",
+      "item": [
+        {
+          "name": "Query - Booking by Order Code",
+          "description": "Mencari satu booking berdasarkan order_code via GraphQL.\n\n{{order_code}} otomatis terisi dari response 'Buat Booking Baru'.\n\nAlternatif dari REST GET /api/bookings/{order_code} dengan lebih banyak field.",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/graphql",
+              "host": ["{{base_url}}"],
+              "path": ["graphql"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"{{order_code}}\\\") { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
+            }
+          }
         },
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"status\": \"PROCESSED\"\n}"
-        }
-      }
-    },
-    {
-      "name": "4. [GraphQL] Cek Booking by Order Code",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json" }
-        ],
-        "url": {
-          "raw": "{{base_url}}/graphql",
-          "host": ["{{base_url}}"],
-          "path": ["graphql"]
+        {
+          "name": "Query - Semua Booking User",
+          "description": "Melihat semua booking milik user tertentu berdasarkan user_id.\n\nGanti user_id 'andi' dengan user yang ingin dicari.",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/graphql",
+              "host": ["{{base_url}}"],
+              "path": ["graphql"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{ myBookings(user_id: \\\"andi\\\") { id order_code concert_id user_id quantity amount status created_at } }\"\n}"
+            }
+          }
         },
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"query\": \"{ bookingByOrder(order_code: \\\"{{order_code}}\\\") { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
-        }
-      }
-    },
-    {
-      "name": "5. [GraphQL] Semua Booking User",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json" }
-        ],
-        "url": {
-          "raw": "{{base_url}}/graphql",
-          "host": ["{{base_url}}"],
-          "path": ["graphql"]
+        {
+          "name": "Query - Booking per Konser",
+          "description": "Melihat semua booking pada konser tertentu berdasarkan concert_id.\n\nGanti concert_id sesuai ID konser dari S1.",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/graphql",
+              "host": ["{{base_url}}"],
+              "path": ["graphql"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{ bookingsByConcert(concert_id: 5) { id order_code concert_id user_id quantity amount status created_at } }\"\n}"
+            }
+          }
         },
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"query\": \"{ myBookings(user_id: \\\"andi\\\") { id order_code concert_id user_id quantity amount status created_at } }\"\n}"
+        {
+          "name": "Query - Semua Booking",
+          "description": "Menampilkan seluruh data booking (untuk keperluan admin/debug).",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/graphql",
+              "host": ["{{base_url}}"],
+              "path": ["graphql"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{ allBookings { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
+            }
+          }
         }
-      }
-    },
-    {
-      "name": "6. [GraphQL] Booking per Konser",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json" }
-        ],
-        "url": {
-          "raw": "{{base_url}}/graphql",
-          "host": ["{{base_url}}"],
-          "path": ["graphql"]
-        },
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"query\": \"{ bookingsByConcert(concert_id: 5) { id order_code concert_id user_id quantity amount status created_at } }\"\n}"
-        }
-      }
-    },
-    {
-      "name": "7. [GraphQL] Semua Booking",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" },
-          { "key": "Accept", "value": "application/json" }
-        ],
-        "url": {
-          "raw": "{{base_url}}/graphql",
-          "host": ["{{base_url}}"],
-          "path": ["graphql"]
-        },
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"query\": \"{ allBookings { id order_code concert_id user_id quantity amount status created_at updated_at } }\"\n}"
-        }
-      }
+      ]
     }
   ]
 }

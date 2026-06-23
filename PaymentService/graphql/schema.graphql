@@ -52,7 +52,7 @@ type Query {
   Cari satu tiket berdasarkan order_code pesanan.
   Bila satu pesanan menghasilkan beberapa tiket, mengembalikan yang pertama.
   """
-  ticketByOrder(order_code: String! @eq): Ticket @find
+  ticketByOrder(order_code: String! @eq): Ticket @first
 
   """
   Cari satu tiket berdasarkan kode tiket (TKT-2026-XYZ99).

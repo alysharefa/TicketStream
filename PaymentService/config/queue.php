@@ -101,9 +101,9 @@ return [
                     'verify_peer' => env('RABBITMQ_SSL_VERIFY_PEER', true),
                     'passphrase' => env('RABBITMQ_SSL_PASSPHRASE'),
                 ],
-                'queue' => [
-                    'job' => \App\Jobs\ProcessTicketOrder::class,
-                ],
+                // 'queue' => [
+                //     'job' => \App\Jobs\ProcessTicketOrder::class,
+                // ],
             ],
 
             'after_commit' => false,
